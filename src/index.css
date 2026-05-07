@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --color-mcm-blue: #3B6EA8;
+  --color-mcm-blue-hover: #2f5a8c;
+  --color-mcm-blue-tint: #f4f8fc;
+  --color-mcm-blue-70: rgba(59, 110, 168, 0.7);
+  --color-mcm-blue-45: rgba(59, 110, 168, 0.45);
+  --color-mcm-blue-25: rgba(59, 110, 168, 0.25);
+
+  --color-ink: #1A1D24;
+  --color-body: #666666;
+  --color-muted: #888888;
+
+  --color-surface: #fafafa;
+  --color-titlebar: #f6f6f6;
+
+  --color-border: #ececec;
+  --color-border-strong: #d8d8d8;
+  --color-border-soft: #f4f4f4;
+
+  --color-success-bg: #e6f4ea;
+  --color-success-fg: #1d7c3f;
+
+  --color-warning-bg: #fef6e8;
+  --color-warning-fg: #b07b1a;
+  --color-warning-border: #f5e3b8;
+  --color-warning-text: #6e4d10;
+
+  --color-error-bg: #f8e0dc;
+  --color-error-fg: #c54a3f;
+  --color-error-row-bg: #fdf2f0;
+  --color-error-border: #e8c8c4;
+
+  --color-not-installed-bg: #f0f0f0;
+  --color-not-installed-fg: #aaaaaa;
+
+  --color-update-row-bg: #f4f8fc;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background: #ffffff;
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  button {
+    font-family: inherit;
+  }
+}
