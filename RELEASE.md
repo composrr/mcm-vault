@@ -1,83 +1,117 @@
 # Releasing MCM Vault
 
-Two parts: shipping the **first install** to a new team member, and shipping **subsequent updates** to people who already have the app.
+Three iteration loops, fastest to slowest.
 
-## One-time setup (do this once on the GitHub repo)
+## Loop 1 — Local hot reload (instant, for active dev)
 
-The release workflow needs the minisign signing key in GitHub secrets so it can sign update bundles.
+```bash
+npm run tauri dev
+```
 
-1. Get the key contents:
-   ```bash
-   cat ~/.tauri/mcm-vault.key
-   ```
-2. In a browser, go to https://github.com/composrr/mcm-vault/settings/secrets/actions and click **New repository secret**.
-3. Name: `TAURI_SIGNING_PRIVATE_KEY` — Value: the full contents of the file (paste).
-4. Add a second secret: `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — Value: leave blank (the key was generated with no password).
+Compiles once (~5-15 min cold, seconds warm), then UI changes hot-reload, Rust changes auto-rebuild. Use this 99% of the time you're tweaking. No GitHub involved.
 
-You can also run `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/mcm-vault.key` from the CLI.
+## Loop 2 — Local installer build (1-3 min, for testing the actual installable artifact)
 
-That's it. The secrets persist across all future runs.
+When you want to verify the .msi/.dmg works the way it will for teammates without waiting on GitHub Actions:
 
-## Cutting a new release
+```bash
+npm run tauri build
+```
 
-1. Bump the version in three places (must match):
+Outputs land in:
+
+- `src-tauri/target/release/bundle/msi/MCM Vault_<ver>_x64_en-US.msi` (Windows)
+- `src-tauri/target/release/bundle/nsis/MCM Vault_<ver>_x64-setup.exe` (Windows, NSIS — installs per-user, no admin)
+- `src-tauri/target/release/bundle/dmg/MCM Vault_<ver>_<arch>.dmg` (macOS)
+
+Double-click to install. This installs the same binary the public release would, but the auto-updater won't see "an update" since the version matches what's published. Test, then bump version + tag for a real release.
+
+## Loop 3 — GitHub Actions release (~15 min, for shipping to teammates)
+
+### Stable release (your team auto-updates to it)
+
+1. Bump version in three files (must match):
    - `package.json` → `version`
    - `src-tauri/Cargo.toml` → `[package].version`
    - `src-tauri/tauri.conf.json` → `version`
-2. Commit:
+2. Commit + push:
    ```bash
    git add -A && git commit -m "Release v0.2.0"
    git push
    ```
-3. Tag and push:
+3. Tag + push the tag:
    ```bash
    git tag v0.2.0
    git push origin v0.2.0
    ```
-4. Watch the workflow on the **Actions** tab. ~10–20 minutes total to build all three platforms.
-5. When it's done, go to **Releases**. The release is in **Draft** state with all installers and a `latest.json` attached. Edit the notes if you want, then click **Publish release**.
+4. Watch https://github.com/composrr/mcm-vault/actions. ~15 min. The workflow auto-publishes the release as **Latest** when all platforms finish — no manual step.
+5. Teammates' apps pick up the update on next launch (or via Settings → "Check for app updates").
 
-The act of publishing flips it from draft to live. The auto-updater endpoint (`https://github.com/composrr/mcm-vault/releases/latest/download/latest.json`) only follows non-draft releases, so users won't see the update until you publish.
+### Beta release (your team does NOT auto-update; you can share manually)
+
+Use a tag with a hyphen — anything matching `vX.Y.Z-something`:
+
+```bash
+git tag v0.2.0-beta.1
+git push origin v0.2.0-beta.1
+```
+
+The workflow:
+- Builds the same artifacts.
+- Marks the GitHub Release as **Pre-release** (not "Latest").
+- Auto-publishes out of draft, so it's visible immediately.
+
+The auto-updater endpoint (`releases/latest/download/latest.json`) ignores pre-releases, so stable users won't be auto-upgraded. To install a beta on someone's machine: send them the direct link to the release page (e.g. https://github.com/composrr/mcm-vault/releases/tag/v0.2.0-beta.1), they download the .msi/.dmg, install. Once it's installed, the app runs at `0.2.0-beta.1` until the next stable release tag — at which point auto-update brings them down/up to that.
+
+Common beta workflow:
+```bash
+git tag v0.2.0-beta.1 && git push origin v0.2.0-beta.1
+# … iterate …
+git tag v0.2.0-beta.2 && git push origin v0.2.0-beta.2
+# … happy with it …
+git tag v0.2.0 && git push origin v0.2.0   # promotes to stable for everyone
+```
+
+## One-time secret setup (already done)
+
+The release workflow needs the minisign signing key so it can sign update bundles. This was set up once via GitHub repo secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY` → contents of `~/.tauri/mcm-vault.key`
+- (No password — we generated the key without one.)
+
+The private key is at `C:\Users\jondr\.tauri\mcm-vault.key`. **Back this up somewhere safe.** If you lose it, you can't sign updates and everyone has to reinstall from a fresh-key release.
 
 ## What gets uploaded per release
 
 For each release the workflow uploads:
 
-- `MCM Vault_<ver>_x64-setup.exe` — Windows installer (NSIS).
-- `MCM Vault_<ver>_x64-setup.exe.sig` — signature file used by the auto-updater.
-- `MCM Vault_<ver>_x64-setup.nsis.zip` — zipped installer for the auto-updater (smaller delta).
-- `MCM Vault_<ver>_aarch64.dmg` — Apple Silicon disk image.
-- `MCM Vault_<ver>_x64.dmg` — Intel Mac disk image.
+- `MCM Vault_<ver>_x64-setup.exe` — Windows NSIS installer (per-user, no admin needed).
+- `MCM Vault_<ver>_x64-setup.exe.sig` — auto-updater signature.
+- `MCM Vault_<ver>_x64_en-US.msi` — Windows MSI (installs to Program Files, requires admin).
+- `MCM Vault_<ver>_x64_en-US.msi.sig` — auto-updater signature.
+- `MCM Vault_<ver>_aarch64.dmg` — macOS Apple Silicon disk image.
+- `MCM Vault_<ver>_x64.dmg` — macOS Intel disk image.
 - `MCM Vault.app.tar.gz` (per architecture) — what the auto-updater downloads on Mac.
-- `latest.json` — the manifest the auto-updater fetches.
+- `latest.json` — the auto-updater manifest.
 
-## How a teammate installs it the first time
+## How a teammate installs the first time
 
-Send them the link to the GitHub Release page. They:
+Send them: https://github.com/composrr/mcm-vault/releases/latest
 
-- **Windows:** Download the `.msi` (or `-setup.exe`). Run it. If Windows shows "Windows protected your PC", click **More info** → **Run anyway**. Install completes, app appears in the Start menu.
-- **macOS:** Download the right `.dmg` (`aarch64` for Apple Silicon, `x64` for Intel). Open it, drag MCM Vault to Applications. First launch only: right-click the app in Applications → **Open** → click **Open** in the dialog. (Gatekeeper warning is normal for unsigned apps; this is a one-time confirmation.)
+- **Windows:** download the `.msi` (or `-setup.exe` if they don't want admin). Run. Click **More info → Run anyway** on the SmartScreen warning. Done.
+- **macOS:** download the right `.dmg` (`aarch64` for M-series, `x64` for Intel). Open it, drag MCM Vault to Applications. First launch: right-click → Open → click Open in the dialog (Gatekeeper bypass for unsigned apps; one-time).
 
-After the first install, `Settings → Check for app updates` does everything.
-
-## How updates work after the first install
-
-1. User clicks **Settings → Check for app updates** (or it can be triggered from anywhere we add a button later).
-2. App fetches `latest.json` from the GitHub Release.
-3. If a newer version exists, app downloads the platform-specific update artifact, verifies the minisign signature against the public key built into the binary, applies the update, restarts.
-4. User is on the new version. No reinstall, no warning dialogs, no admin rights needed.
-
-If signature verification fails, the update is rejected — the user keeps the old version. This is the protection you get without paid code-signing certs: the app trusts only updates signed with **your** key.
+After that, **Settings → Check for app updates** is all they need.
 
 ## Recovering if you lose the signing key
 
-Don't. Back up `~/.tauri/mcm-vault.key` (and `.key.pub`) somewhere safe (1Password, encrypted drive, etc.).
+Don't lose it. The file `C:\Users\jondr\.tauri\mcm-vault.key` should be in 1Password / encrypted backup.
 
-If you do lose it: generate a new key, replace the `pubkey` in `tauri.conf.json` with the new one, ship a release the **old** way (everyone reinstalls from scratch). After that everyone is back on the new key for future auto-updates.
+If you do lose it: generate a new key with `npm run tauri signer generate -- --write-keys ~/.tauri/mcm-vault.key`, replace the `pubkey` in `tauri.conf.json` with the new public key, ship a release the **old** way (everyone reinstalls). Future updates resume.
 
 ## Troubleshooting
 
-- **Workflow fails on signing**: secret `TAURI_SIGNING_PRIVATE_KEY` is missing or wrong. Check the Actions log.
-- **App says "update failed: signature mismatch"**: the public key in `tauri.conf.json` doesn't match the private key that signed the release. Re-check both ends.
-- **macOS users say the app is "damaged"**: Gatekeeper quarantine. They can clear it with `xattr -d com.apple.quarantine /Applications/MCM\ Vault.app` in Terminal, or right-click → Open the first time.
-- **Windows SmartScreen blocks every time**: SmartScreen reputation builds over time as more people install. Without a code-signing cert ($300+/year), this is unavoidable. Tell users to click "More info" → "Run anyway" the first time.
+- **Workflow fails on signing step** — `TAURI_SIGNING_PRIVATE_KEY` repo secret is missing or wrong.
+- **App says "Update failed: signature mismatch"** — pubkey in `tauri.conf.json` doesn't match the private key that signed the release.
+- **App says "Could not fetch a valid release JSON from the remote"** — the `mcm-vault` repo went private (the updater fetches anonymously). Make it public.
+- **Windows SmartScreen blocks every install** — unavoidable without a code-signing cert ($300+/year). Tell users "More info → Run anyway".
