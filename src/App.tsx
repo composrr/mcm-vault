@@ -264,7 +264,7 @@ function App() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
       <AppHeader onOpenSettings={() => setView("settings")} />
-      {publisherMode && view !== "settings" && view !== "detail" && (
+      {publisherMode && view !== "detail" && (
         <div className="flex border-b border-border bg-surface px-5 py-1.5">
           <div className="flex gap-1 rounded-md border border-border-strong bg-white p-0.5">
             <button

@@ -65,19 +65,15 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
         bundles.map(async (b) => {
           const sourcePath = await publisherDefaultSource(b, folderLabel);
           const existing = publisherEntries[b.id];
-          // First-time init: seed includedFiles from manifest (intersected with locally present)
-          // so fresh installs auto-check what's already in the bundle.
-          let nextIncluded = existing?.includedFiles;
-          if (nextIncluded === undefined) {
-            // Defer until we have the scan results to know what's locally present.
-            nextIncluded = undefined;
-          }
+          // First-time init: seed includedFiles after scan results arrive
+          // (we need to know what's locally present to intersect with manifest).
+          // Default to empty here; the seed pass below populates new bundles.
           nextPublisher[b.id] = {
             sourcePath,
             lastPublishedFiles: existing?.lastPublishedFiles ?? {},
             lastPublishedAt: existing?.lastPublishedAt ?? null,
             lastPublishedVersion: existing?.lastPublishedVersion ?? null,
-            includedFiles: nextIncluded ?? [],
+            includedFiles: existing?.includedFiles ?? [],
           };
           return {
             bundleId: b.id,
