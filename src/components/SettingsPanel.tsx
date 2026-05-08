@@ -205,6 +205,11 @@ export function SettingsPanel({
         </section>
 
         <section>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">APP UPDATES</div>
+          <AppUpdateButton />
+        </section>
+
+        <section>
           <div className="mb-2 text-[11px] tracking-wide text-muted">ABOUT</div>
           <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
             <div className="flex justify-between py-0.5 text-[13px]">
@@ -219,5 +224,98 @@ export function SettingsPanel({
         </section>
       </div>
     </div>
+  );
+}
+
+function AppUpdateButton() {
+  const [status, setStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "checking" }
+    | { kind: "uptodate" }
+    | { kind: "available"; version: string }
+    | { kind: "downloading"; downloaded: number; total: number | null }
+    | { kind: "ready" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+
+  const onClick = async () => {
+    setStatus({ kind: "checking" });
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const update = await check();
+      if (!update) {
+        setStatus({ kind: "uptodate" });
+        return;
+      }
+      setStatus({ kind: "available", version: update.version });
+      let downloaded = 0;
+      let total: number | null = null;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? null;
+          setStatus({ kind: "downloading", downloaded: 0, total });
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setStatus({ kind: "downloading", downloaded, total });
+        } else if (event.event === "Finished") {
+          setStatus({ kind: "ready" });
+        }
+      });
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    } catch (e) {
+      setStatus({
+        kind: "error",
+        message:
+          typeof e === "object" && e && "message" in e
+            ? String((e as { message?: unknown }).message ?? e)
+            : String(e),
+      });
+    }
+  };
+
+  let label = "Check for app updates";
+  let busy = false;
+  if (status.kind === "checking") {
+    label = "Checking…";
+    busy = true;
+  } else if (status.kind === "uptodate") {
+    label = "Up to date";
+  } else if (status.kind === "available") {
+    label = `Update available — v${status.version}, downloading…`;
+    busy = true;
+  } else if (status.kind === "downloading") {
+    const pct = status.total
+      ? Math.floor((status.downloaded / status.total) * 100)
+      : null;
+    label = pct != null ? `Downloading… ${pct}%` : "Downloading…";
+    busy = true;
+  } else if (status.kind === "ready") {
+    label = "Restarting…";
+    busy = true;
+  } else if (status.kind === "error") {
+    label = `Update failed: ${status.message}`;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void onClick()}
+      disabled={busy}
+      className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3.5 py-2.5 hover:bg-border-soft disabled:opacity-60"
+    >
+      <span
+        className={`text-[13px] ${
+          status.kind === "error" ? "text-error-fg" : "text-ink"
+        }`}
+      >
+        {label}
+      </span>
+      <IconRefresh
+        size={16}
+        stroke={2}
+        className={`text-muted ${busy ? "animate-spin" : ""}`}
+      />
+    </button>
   );
 }
