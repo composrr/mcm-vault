@@ -251,3 +251,24 @@ pub async fn open_vault_folder() -> Result<String, InstallError> {
     let _ = open::that(&folder);
     Ok(folder.to_string_lossy().to_string())
 }
+
+/// Resolve the canonical install folder for a (category, preset_type), create
+/// it if missing, and open it in the OS file manager. Used by Reveal buttons
+/// in the bundle detail view and manual-import modal so they work even when
+/// no files have been installed yet.
+#[tauri::command]
+pub async fn reveal_bundle_folder(
+    category: String,
+    preset_type: String,
+    folder_label: String,
+) -> Result<String, InstallError> {
+    let target = path_resolver::resolve_install_path(&category, &preset_type, &folder_label)?;
+    let path = PathBuf::from(&target.path);
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| InstallError::Io {
+            message: e.to_string(),
+        })?;
+    let _ = open::that(&path);
+    Ok(target.path)
+}

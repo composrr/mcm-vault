@@ -37,6 +37,7 @@ const DEFAULT_PERSISTED_STATE: PersistedState = {
   lastKnownManifest: null,
   publisher: {},
   publisherRepoPath: null,
+  disabledBundles: [],
 };
 
 export type FetchStatus = "idle" | "loading" | "success" | "offline" | "error";
@@ -63,6 +64,7 @@ export interface AppStore {
   removeBundle: (bundleId: string) => Promise<void>;
   saveSettings: (next: AppSettings) => Promise<void>;
   setPersisted: (patch: Partial<PersistedState>) => Promise<void>;
+  toggleBundleDisabled: (bundleId: string) => Promise<void>;
   runDiagnostics: () => Promise<DiagnosticReport>;
   markFirstRunComplete: () => void;
 }
@@ -221,7 +223,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   async installAllUpdates() {
     const { manifest, persisted, installOne } = get();
     if (!manifest) return;
+    const disabled = new Set(persisted.disabledBundles);
     const queue = manifest.bundles.filter((b) => {
+      if (disabled.has(b.id)) return false;
       const inst = persisted.installedBundles[b.id];
       return !inst || inst.version !== b.version;
     });
@@ -261,6 +265,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   async setPersisted(patch: Partial<PersistedState>) {
     const next = await persist(get, patch);
+    set({ persisted: next });
+  },
+
+  async toggleBundleDisabled(bundleId: string) {
+    const cur = new Set(get().persisted.disabledBundles);
+    if (cur.has(bundleId)) cur.delete(bundleId);
+    else cur.add(bundleId);
+    const next = await persist(get, {
+      disabledBundles: Array.from(cur).sort(),
+    });
     set({ persisted: next });
   },
 

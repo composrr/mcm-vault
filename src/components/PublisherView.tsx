@@ -377,6 +377,19 @@ interface BundlePanelProps {
   onReveal: (path: string) => void;
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function fileExt(name: string): string {
+  const i = name.lastIndexOf(".");
+  if (i < 0 || i === name.length - 1) return "";
+  return name.slice(i + 1).toLowerCase();
+}
+
 function BundlePanel({
   bundle,
   status,
@@ -387,7 +400,7 @@ function BundlePanel({
   onUpdateSourcePath,
   onReveal,
 }: BundlePanelProps) {
-  const sourcePath = entry?.sourcePath ?? "(scanning to suggest a path…)";
+  const sourcePath = entry?.sourcePath ?? "(scanning…)";
   const localFiles = status?.diff.currentFiles ?? [];
   const manifestSet = new Set(bundle.files);
   const checkedCount = Array.from(selected).filter((n) =>
@@ -405,71 +418,77 @@ function BundlePanel({
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-[14px] font-medium text-ink">{bundle.name}</div>
+          <div className="flex items-baseline gap-2">
+            <div className="text-[14px] font-medium text-ink truncate">
+              {bundle.name}
+            </div>
+            <div className="text-[11px] tabular-nums text-muted">
+              v{bundle.version}
+            </div>
+          </div>
           <div className="mt-0.5 text-[11px] text-muted">
-            {bundle.category === "premiere" ? "Premiere Pro" : "DaVinci Resolve"}{" "}
-            · {bundle.presetType} · v{bundle.version}
+            {checkedCount} in bundle
+            {remoteOnly > 0 ? ` · ${remoteOnly} on other machine` : ""}
             {entry?.lastPublishedVersion
-              ? ` · last published ${entry.lastPublishedVersion}`
+              ? ` · last pub v${entry.lastPublishedVersion}`
               : ""}
           </div>
         </div>
-        <div className="text-right text-[11px] tabular-nums text-muted">
-          {checkedCount} in bundle
-          {remoteOnly > 0 ? ` · ${remoteOnly} on other machine` : ""}
-        </div>
-      </div>
-
-      <div className="mt-2 flex items-center gap-2">
-        <input
-          type="text"
-          value={sourcePath}
-          onChange={(e) => onUpdateSourcePath(e.target.value)}
-          className="flex-1 rounded-md border border-border-strong bg-white px-2.5 py-1 font-mono text-[11px] text-body focus:border-mcm-blue focus:outline-none"
-          placeholder="Source folder on this machine"
-        />
         <button
           type="button"
           onClick={() => onReveal(sourcePath)}
-          className="shrink-0 rounded-md p-1 text-muted hover:bg-border-soft"
+          className="shrink-0 flex items-center gap-1 rounded-md border border-border-strong bg-white px-2 py-1 text-[11px] text-body hover:bg-border-soft"
           aria-label="Open source folder"
-          title="Open source folder"
+          title={sourcePath}
         >
-          <IconFolderOpen size={16} stroke={2} />
+          <IconFolderOpen size={13} stroke={2} />
+          Open folder
         </button>
       </div>
 
       {status?.diff && !status.diff.sourceExists ? (
-        <div className="mt-2 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[12px] text-warning-text">
-          Source folder doesn't exist yet. Click the folder icon to create it,
-          or save a preset there from{" "}
-          {bundle.category === "premiere" ? "Premiere" : "Resolve"}.
+        <div className="mt-2.5 rounded-md border border-warning-border bg-warning-bg px-3 py-2.5 text-[12px] text-warning-text">
+          <div className="font-medium mb-0.5">Source folder doesn't exist yet</div>
+          <div className="text-[11px]">
+            Click <span className="font-medium">Open folder</span> above to
+            create it, then save a preset there from{" "}
+            {bundle.category === "premiere" ? "Premiere" : "Resolve"}.
+          </div>
         </div>
       ) : localFiles.length === 0 ? (
-        <div className="mt-2 text-[11px] text-muted">
-          No files in this folder yet.
+        <div className="mt-2.5 rounded-md border border-dashed border-border bg-surface px-3 py-3 text-center">
+          <div className="text-[12px] text-body">No files yet</div>
+          <div className="mt-0.5 text-[10.5px] text-muted">
+            Save a preset in{" "}
+            {bundle.category === "premiere" ? "Premiere" : "Resolve"} to the
+            source folder, then click <span className="font-medium">Rescan</span>.
+          </div>
         </div>
       ) : (
-        <div className="mt-2 overflow-hidden rounded-md border border-border bg-white">
+        <div className="mt-2.5 overflow-hidden rounded-md border border-border bg-white">
           {localFiles.map((f) => {
             const isSelected = selected.has(f.name);
             const inManifest = manifestSet.has(f.name);
             const isModified = status?.diff.modified.includes(f.name) ?? false;
             let statusLabel = "";
-            let statusClass = "text-muted";
+            let statusClass = "bg-border-soft text-muted";
             if (isSelected && !inManifest) {
               statusLabel = "will add";
-              statusClass = "text-success-fg font-medium";
+              statusClass = "bg-success-bg text-success-fg";
             } else if (!isSelected && inManifest) {
               statusLabel = "will remove";
-              statusClass = "text-error-fg font-medium";
+              statusClass = "bg-error-bg text-error-fg";
             } else if (isSelected && isModified) {
               statusLabel = "modified";
-              statusClass = "text-mcm-blue font-medium";
+              statusClass = "bg-mcm-blue/15 text-mcm-blue";
             } else if (isSelected) {
               statusLabel = "in bundle";
-              statusClass = "text-muted";
+              statusClass = "bg-success-bg/60 text-success-fg";
+            } else {
+              statusLabel = "available";
+              statusClass = "bg-border-soft text-muted";
             }
+            const ext = fileExt(f.name);
             return (
               <label
                 key={f.name}
@@ -481,8 +500,20 @@ function BundlePanel({
                   onChange={() => onToggleFile(f.name)}
                   className="h-3.5 w-3.5 shrink-0 accent-mcm-blue"
                 />
-                <span className="flex-1 font-mono text-ink">{f.name}</span>
-                <span className={`text-[11px] ${statusClass}`}>
+                {ext && (
+                  <span className="shrink-0 rounded bg-border-soft px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted">
+                    {ext}
+                  </span>
+                )}
+                <span className="flex-1 truncate font-medium text-ink">
+                  {f.name.replace(/\.[^.]+$/, "")}
+                </span>
+                <span className="shrink-0 tabular-nums text-[10.5px] text-muted">
+                  {formatBytes(f.size)}
+                </span>
+                <span
+                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusClass}`}
+                >
                   {statusLabel}
                 </span>
               </label>
@@ -492,11 +523,27 @@ function BundlePanel({
       )}
 
       {remoteOnly > 0 && (
-        <div className="mt-2 text-[11px] text-muted">
-          {remoteOnly} file{remoteOnly === 1 ? "" : "s"} in this bundle aren't
-          on this machine — preserved on publish.
+        <div className="mt-2 text-[10.5px] text-muted">
+          {remoteOnly} file{remoteOnly === 1 ? "" : "s"} live on another machine
+          and stay untouched.
         </div>
       )}
+
+      <details className="mt-2 group">
+        <summary className="cursor-pointer text-[10.5px] text-muted hover:text-body select-none list-none">
+          <span className="group-open:hidden">Show source path</span>
+          <span className="hidden group-open:inline">Hide source path</span>
+        </summary>
+        <div className="mt-1.5">
+          <input
+            type="text"
+            value={sourcePath}
+            onChange={(e) => onUpdateSourcePath(e.target.value)}
+            className="w-full rounded-md border border-border-strong bg-white px-2.5 py-1 font-mono text-[11px] text-body focus:border-mcm-blue focus:outline-none"
+            placeholder="Source folder on this machine"
+          />
+        </div>
+      </details>
     </div>
   );
 }

@@ -84,6 +84,11 @@ pub struct AppState {
     pub publisher: BTreeMap<String, PublisherBundleState>,
     #[serde(default)]
     pub publisher_repo_path: Option<String>,
+    /// Bundle IDs the user has opted out of on this machine. Disabled bundles
+    /// don't auto-install, don't count toward "Update all," and show muted in
+    /// the receive view.
+    #[serde(default)]
+    pub disabled_bundles: Vec<String>,
 }
 
 impl Default for AppState {
@@ -98,6 +103,7 @@ impl Default for AppState {
             last_known_manifest: None,
             publisher: BTreeMap::new(),
             publisher_repo_path: None,
+            disabled_bundles: Vec::new(),
         }
     }
 }
@@ -168,6 +174,27 @@ pub fn open_log_folder() -> Result<String, StateError> {
     })?;
     let _ = open::that(&dir);
     Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn read_recent_log(lines: usize) -> Result<Vec<String>, StateError> {
+    let path = log_dir()?.join("app.log");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| StateError::Io { message: e.to_string() })?;
+    let text = String::from_utf8_lossy(&bytes);
+    let n = lines.max(1);
+    let collected: Vec<String> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .rev()
+        .take(n)
+        .map(|s| s.to_string())
+        .collect();
+    Ok(collected)
 }
 
 #[tauri::command]
