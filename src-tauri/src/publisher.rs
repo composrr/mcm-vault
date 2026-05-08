@@ -5,6 +5,20 @@ use std::process::Stdio;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn make_git_command(args: &[&str], cwd: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.args(args).current_dir(cwd).stdin(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 use crate::branding;
 use crate::manifest::{self, Bundle};
 use crate::state;
@@ -195,10 +209,7 @@ async fn ensure_repo_cloned() -> Result<PathBuf, PublisherError> {
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PublisherError> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .stdin(Stdio::null())
+    let output = make_git_command(args, cwd)
         .output()
         .await
         .map_err(|e| PublisherError::Git {
@@ -476,10 +487,7 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
         .collect::<Vec<_>>()
         .join(", ");
     let commit_msg = format!("Publish from MCM Vault: {summary}");
-    let commit_out = Command::new("git")
-        .args(["commit", "-m", &commit_msg])
-        .current_dir(&repo)
-        .stdin(Stdio::null())
+    let commit_out = make_git_command(&["commit", "-m", &commit_msg], &repo)
         .output()
         .await
         .map_err(|e| PublisherError::Git {
