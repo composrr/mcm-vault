@@ -60,11 +60,14 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     setScanning(true);
     setPublishError(null);
     try {
-      const nextPublisher = { ...persisted.publisher };
+      // Read fresh state, not the closure — publish() calls scan() right after
+      // setPersisted, and the closure's `persisted` is still pre-publish.
+      const freshPublisher = useAppStore.getState().persisted.publisher;
+      const nextPublisher = { ...freshPublisher };
       const inputs = await Promise.all(
         bundles.map(async (b) => {
           const sourcePath = await publisherDefaultSource(b, folderLabel);
-          const existing = publisherEntries[b.id];
+          const existing = freshPublisher[b.id];
           // First-time init: seed includedFiles after scan results arrive
           // (we need to know what's locally present to intersect with manifest).
           // Default to empty here; the seed pass below populates new bundles.
@@ -86,7 +89,7 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
 
       // Seed includedFiles for any bundle that didn't have one yet.
       for (const diff of results) {
-        const existing = persisted.publisher[diff.bundleId];
+        const existing = freshPublisher[diff.bundleId];
         if (existing?.includedFiles && existing.includedFiles.length > 0) continue;
         const bundle = bundlesById[diff.bundleId];
         if (!bundle) continue;
@@ -217,12 +220,19 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
           lastPublishedVersion: p.newVersion,
         };
       }
-      setPersisted({ publisher: updated });
+      await setPersisted({ publisher: updated });
       setPublishMessage(
         `Published ${result.published.length} ${
           result.published.length === 1 ? "bundle" : "bundles"
         }.${result.commitSha ? ` Commit ${result.commitSha.slice(0, 7)}.` : ""}`
       );
+      // Refresh manifest cache so the UI reflects the new bundle versions/files
+      // we just pushed (otherwise lastKnownManifest stays stale until next launch).
+      try {
+        await useAppStore.getState().refreshManifest();
+      } catch (e) {
+        console.warn("manifest refresh after publish failed", e);
+      }
       await scan();
     } catch (e) {
       console.error("Publish failed", e);
