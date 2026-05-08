@@ -85,15 +85,15 @@ export function BundleRow({ row, onClick }: BundleRowProps) {
           onClick();
         }
       }}
-      className={`flex items-center gap-3 border-b border-border-soft px-5 py-3 last:border-b-0 ${rowBg} ${interactive}`}
+      className={`flex items-center gap-2.5 border-b border-border-soft px-5 py-1.5 last:border-b-0 ${rowBg} ${interactive}`}
     >
-      <StatusIcon status={status} />
+      <StatusIcon status={status} size={18} />
       <div className="min-w-0 flex-1">
-        <div className="text-[14px] font-medium text-ink truncate">{bundle.name}</div>
-        <div className={`mt-0.5 text-[11px] ${metaClass}`}>{meta.text}</div>
+        <div className="text-[13px] font-medium text-ink truncate leading-tight">{bundle.name}</div>
+        <div className={`text-[10.5px] leading-tight ${metaClass}`}>{meta.text}</div>
       </div>
       {status !== "error" && (
-        <div className={`text-[12px] tabular-nums ${versionClass}`}>v{bundle.version}</div>
+        <div className={`text-[11px] tabular-nums ${versionClass}`}>v{bundle.version}</div>
       )}
     </div>
   );
