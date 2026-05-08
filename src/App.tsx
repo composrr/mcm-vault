@@ -16,7 +16,12 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { PublisherView } from "./components/PublisherView";
 import { useAppStore } from "./store/useAppStore";
 import { deriveRows } from "./lib/derive";
-import { openStateFolder, openVaultFolder, revealPath } from "./lib/tauri";
+import {
+  isTauri,
+  openLogFolder,
+  openVaultFolder,
+  revealPath,
+} from "./lib/tauri";
 
 const APP_VERSION = "0.1.0";
 
@@ -51,6 +56,29 @@ function App() {
   useEffect(() => {
     void init();
   }, [init]);
+
+  // Background-check for app updates on launch. If a newer build exists,
+  // we silently download + install + restart. Auto-updater is signed by
+  // our minisign key so this is safe to do without confirmation.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { check } = await import("@tauri-apps/plugin-updater");
+        const update = await check();
+        if (cancelled || !update) return;
+        await update.downloadAndInstall();
+        const { relaunch } = await import("@tauri-apps/plugin-process");
+        await relaunch();
+      } catch (e) {
+        console.warn("App update check failed (ignored)", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const hasAutoUpdatedRef = useRef(false);
   useEffect(() => {
@@ -220,8 +248,7 @@ function App() {
           onChange={(next) => void saveSettings(next)}
           onOpenLogFolder={async () => {
             try {
-              const folder = await openStateFolder();
-              await revealPath(folder);
+              await openLogFolder();
             } catch (e) {
               console.error("Open log folder failed", e);
             }
@@ -290,6 +317,16 @@ function App() {
           }}
           onReinstall={() => void installOne(selectedBundle)}
           onRemove={() => {
+            const installed =
+              persisted.installedBundles[selectedBundle.id];
+            const fileCount = installed?.files.length ?? 0;
+            const ok = window.confirm(
+              `Remove "${selectedBundle.name}"?\n\n` +
+                `This will delete ${fileCount} file${
+                  fileCount === 1 ? "" : "s"
+                } from disk.`
+            );
+            if (!ok) return;
             void removeBundle(selectedBundle.id);
             setSelectedBundleId(null);
             setView("main");
@@ -328,6 +365,7 @@ function App() {
             lastChecked={persisted.lastChecked}
             onRefresh={() => void refresh()}
             refreshing={fetchStatus === "loading"}
+            appVersion={APP_VERSION}
           />
         </>
       )}

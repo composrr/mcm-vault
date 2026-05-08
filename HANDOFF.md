@@ -39,6 +39,12 @@ Recent fixes in order:
 7. Refresh button only fetches; auto-install only fires once per launch
 8. Cache-bust on manifest URL (avoids stale CDN reads)
 9. Publisher checkboxes persist in `state.json` (survive tab switch + relaunch)
+10. Receive-side never auto-deletes; Remove now confirms before deleting
+11. Resolve LUT path on Mac moved to user-scoped `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT/<label>/` (was system-wide)
+12. App version visible in main window status bar
+13. Auto-update check on app launch (silent download + restart if newer signed build available)
+14. Tauri auto-updater plugin wired with minisign signing; GitHub Actions release workflow at `.github/workflows/release.yml` ships installers + updater manifest on every `v*` tag
+15. File logging to `<app data>/logs/app.log`; "Open log folder" in settings reveals it
 
 ## Architecture notes
 
@@ -53,8 +59,8 @@ Recent fixes in order:
 
 ## Mac-specific things to know
 
-- The Mac path branches in `path_resolver.rs` exist but **haven't been tested on real hardware**. First time on Mac, expect potential path drift.
-- The Resolve LUT path on Mac currently resolves to `/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT/<label>` which is system-wide and may need admin rights. If install fails with permission denied, switch it to `~/Library/Application Support/...` — same change pattern as the Adobe LUT fix that already shipped.
+- Mac path branches in `path_resolver.rs` are tested on real hardware as of this handoff.
+- Resolve LUT path on Mac is `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT/<label>/` — user-scoped, no admin needed.
 - Adobe Media Encoder version detection: `~/Documents/Adobe/Adobe Media Encoder/<ver>/Presets/` (same as Windows minus the drive letter).
 - `dirs::data_dir()` on Mac returns `~/Library/Application Support` (this is where `MCMVault/state.json` lives on Mac).
 - Tauri uses macOS title bar overlay style on Mac per `tauri.conf.json`. The app should look closer to mockup `01-main-window.html` on Mac than on Windows (where the OS title bar is dark).

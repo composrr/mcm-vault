@@ -52,6 +52,10 @@ export async function openStateFolder(): Promise<string> {
   return invoke<string>("open_state_folder");
 }
 
+export async function openLogFolder(): Promise<string> {
+  return invoke<string>("open_log_folder");
+}
+
 export interface PathReport {
   label: string;
   path: string;

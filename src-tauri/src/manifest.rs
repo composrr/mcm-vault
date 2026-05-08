@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::branding;
+use crate::{branding, state};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +55,7 @@ pub async fn fetch_manifest() -> Result<Manifest, ManifestError> {
     // shows up immediately instead of after the ~5 minute TTL.
     let cb = chrono::Utc::now().timestamp_millis();
     let url = format!("{}?_={}", branding::manifest_url(), cb);
+    state::log_event("INFO", format!("fetch_manifest GET {url}"));
     let response = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .user_agent(format!("{}/0.1", branding::APP_NAME))
@@ -89,7 +90,19 @@ pub async fn fetch_manifest() -> Result<Manifest, ManifestError> {
             message: e.to_string(),
         })?;
 
-    serde_json::from_str::<Manifest>(&body).map_err(|e| ManifestError::Parse {
-        message: e.to_string(),
-    })
+    let parsed = serde_json::from_str::<Manifest>(&body).map_err(|e| {
+        state::log_event("ERROR", format!("manifest parse failed: {e}"));
+        ManifestError::Parse {
+            message: e.to_string(),
+        }
+    })?;
+    state::log_event(
+        "INFO",
+        format!(
+            "fetch_manifest OK ({} bundles, updatedAt={})",
+            parsed.bundles.len(),
+            parsed.updated_at
+        ),
+    );
+    Ok(parsed)
 }

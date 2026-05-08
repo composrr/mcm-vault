@@ -5,6 +5,7 @@ interface StatusBarProps {
   onRefresh?: () => void;
   refreshing?: boolean;
   errorMessage?: string;
+  appVersion?: string;
 }
 
 function formatRelative(iso: string | null): string {
@@ -26,21 +27,31 @@ export function StatusBar({
   onRefresh,
   refreshing = false,
   errorMessage,
+  appVersion,
 }: StatusBarProps) {
   return (
-    <div className="flex items-center justify-between border-t border-border bg-titlebar px-5 py-2 text-[11px] text-muted">
+    <div className="flex items-center justify-between gap-2 border-t border-border bg-titlebar px-5 py-2 text-[11px] text-muted">
       <span className={errorMessage ? "text-error-fg" : ""}>
         {errorMessage ?? formatRelative(lastChecked)}
       </span>
-      <button
-        type="button"
-        aria-label="Refresh"
-        onClick={onRefresh}
-        disabled={refreshing}
-        className="flex items-center justify-center rounded-md p-1 text-muted hover:bg-border-soft disabled:opacity-50"
-      >
-        <IconRefresh size={14} stroke={2} className={refreshing ? "animate-spin" : ""} />
-      </button>
+      <div className="flex items-center gap-2">
+        {appVersion && (
+          <span className="tabular-nums text-muted">v{appVersion}</span>
+        )}
+        <button
+          type="button"
+          aria-label="Refresh"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center justify-center rounded-md p-1 text-muted hover:bg-border-soft disabled:opacity-50"
+        >
+          <IconRefresh
+            size={14}
+            stroke={2}
+            className={refreshing ? "animate-spin" : ""}
+          />
+        </button>
+      </div>
     </div>
   );
 }

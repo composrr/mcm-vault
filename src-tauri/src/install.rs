@@ -117,6 +117,16 @@ pub async fn install_bundle(
     let target =
         path_resolver::resolve_install_path(&bundle.category, &bundle.preset_type, &folder_label)?;
     let install_dir = PathBuf::from(&target.path);
+    state::log_event(
+        "INFO",
+        format!(
+            "install_bundle id={} version={} files={} target={}",
+            bundle.id,
+            bundle.version,
+            bundle.files.len(),
+            install_dir.display()
+        ),
+    );
 
     let staging_root = state::app_data_dir()
         .map_err(|e| InstallError::Path {

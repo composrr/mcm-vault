@@ -31,6 +31,7 @@ pub fn run() {
             state::read_state,
             state::write_state,
             state::open_state_folder,
+            state::open_log_folder,
             path_resolver::scan_host_apps,
             path_resolver::resolve_target,
             install::install_bundle,

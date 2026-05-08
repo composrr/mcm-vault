@@ -328,9 +328,11 @@ fn detect_resolve(folder_label: &str) -> AppDetection {
             installed_signal |= bmd.exists();
             paths.push(check_path(
                 &format!("Resolve LUTs (.cube, .3dl) — {folder_label} folder"),
-                &PathBuf::from(format!(
-                    "/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT/{folder_label}"
-                )),
+                &ad
+                    .join("Blackmagic Design")
+                    .join("DaVinci Resolve")
+                    .join("LUT")
+                    .join(folder_label),
             ));
             paths.push(check_path(
                 "Fusion templates (.setting)",
@@ -542,9 +544,14 @@ fn resolve_lut_path(folder_label: &str) -> Result<PathBuf, PathError> {
             .join("LUT")
             .join(folder_label))
     } else {
-        Ok(PathBuf::from(format!(
-            "/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT/{folder_label}"
-        )))
+        // Use the per-user Resolve LUT folder so installs don't need admin rights.
+        Ok(home_dir()?
+            .join("Library")
+            .join("Application Support")
+            .join("Blackmagic Design")
+            .join("DaVinci Resolve")
+            .join("LUT")
+            .join(folder_label))
     }
 }
 

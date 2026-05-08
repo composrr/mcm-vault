@@ -144,6 +144,32 @@ pub fn log_dir() -> Result<PathBuf, StateError> {
     Ok(app_data_dir()?.join("logs"))
 }
 
+pub fn log_event(level: &str, message: impl AsRef<str>) {
+    let Ok(dir) = log_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("app.log");
+    let now = chrono::Utc::now().to_rfc3339();
+    let line = format!("{now} {level:<5} {}\n", message.as_ref());
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+#[tauri::command]
+pub fn open_log_folder() -> Result<String, StateError> {
+    let dir = log_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| StateError::Io {
+        message: e.to_string(),
+    })?;
+    let _ = open::that(&dir);
+    Ok(dir.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub async fn read_state() -> Result<AppState, StateError> {
     let path = state_file_path()?;

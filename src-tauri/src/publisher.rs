@@ -272,6 +272,14 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
             message: "nothing to publish".into(),
         });
     }
+    state::log_event(
+        "INFO",
+        format!(
+            "publish_bundles start ({} bundle{})",
+            plans.len(),
+            if plans.len() == 1 { "" } else { "s" }
+        ),
+    );
     let repo = ensure_repo_cloned().await?;
 
     let manifest_path = repo.join("manifest.json");
