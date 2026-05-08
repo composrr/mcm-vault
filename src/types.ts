@@ -80,6 +80,7 @@ export interface AppState {
   lastKnownManifest: Manifest | null;
   publisher: Record<string, PublisherBundleState>;
   publisherRepoPath: string | null;
+  disabledBundles: string[];
 }
 
 export interface BundleRowData {
@@ -87,4 +88,5 @@ export interface BundleRowData {
   status: BundleStatusKind;
   installedVersion?: string;
   errorMessage?: string;
+  disabled?: boolean;
 }

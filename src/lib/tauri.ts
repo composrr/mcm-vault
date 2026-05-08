@@ -56,6 +56,10 @@ export async function openLogFolder(): Promise<string> {
   return invoke<string>("open_log_folder");
 }
 
+export async function readRecentLog(lines: number): Promise<string[]> {
+  return invoke<string[]>("read_recent_log", { lines });
+}
+
 export interface PathReport {
   label: string;
   path: string;
@@ -116,6 +120,18 @@ export async function revealPath(path: string): Promise<void> {
 
 export async function openVaultFolder(): Promise<string> {
   return invoke<string>("open_vault_folder");
+}
+
+export async function revealBundleFolder(
+  category: string,
+  presetType: string,
+  folderLabel: string
+): Promise<string> {
+  return invoke<string>("reveal_bundle_folder", {
+    category,
+    presetType,
+    folderLabel,
+  });
 }
 
 export interface ScannedFile {

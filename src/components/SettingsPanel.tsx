@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IconArrowLeft, IconRefresh, IconExternalLink } from "@tabler/icons-react";
 import type { AppSettings } from "../types";
-import type { DiagnosticReport } from "../lib/tauri";
+import { readRecentLog, type DiagnosticReport } from "../lib/tauri";
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -97,13 +97,6 @@ export function SettingsPanel({
           <div className="mb-2 text-[11px] tracking-wide text-muted">UPDATES</div>
           <div className="space-y-2">
             <Toggle
-              checked={settings.autoUpdateOnLaunch}
-              onChange={(v) =>
-                onChange({ ...settings, autoUpdateOnLaunch: v })
-              }
-              label="Check for updates on launch"
-            />
-            <Toggle
               checked={settings.showNotifications}
               onChange={(v) =>
                 onChange({ ...settings, showNotifications: v })
@@ -169,14 +162,15 @@ export function SettingsPanel({
         </section>
 
         <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">LOGS</div>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">RECENT ACTIVITY</div>
+          <RecentActivity />
           <button
             type="button"
             onClick={onOpenLogFolder}
-            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3.5 py-2.5 hover:bg-border-soft"
+            className="mt-2 flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3.5 py-2 hover:bg-border-soft"
           >
-            <span className="text-[13px] text-ink">Open log folder</span>
-            <IconExternalLink size={16} stroke={2} className="text-muted" />
+            <span className="text-[12px] text-body">Open log folder</span>
+            <IconExternalLink size={14} stroke={2} className="text-muted" />
           </button>
         </section>
 
@@ -222,6 +216,142 @@ export function SettingsPanel({
             </div>
           </div>
         </section>
+      </div>
+    </div>
+  );
+}
+
+function formatLogTimestamp(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const diffMs = Date.now() - t;
+  const sec = Math.max(0, Math.round(diffMs / 1000));
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
+}
+
+function prettifyLogMessage(msg: string): string {
+  // Tighten up the verbose Rust-side log lines into a friendlier sentence.
+  if (msg.startsWith("install_bundle")) {
+    const idMatch = msg.match(/id=(\S+)/);
+    const versionMatch = msg.match(/version=(\S+)/);
+    const filesMatch = msg.match(/files=(\d+)/);
+    const id = idMatch?.[1] ?? "?";
+    const ver = versionMatch?.[1] ?? "";
+    const count = filesMatch?.[1] ?? "0";
+    return `Installed ${id}${ver ? ` v${ver}` : ""} (${count} ${count === "1" ? "file" : "files"})`;
+  }
+  if (msg.startsWith("publish_bundles start")) {
+    const m = msg.match(/\((\d+) bundle/);
+    const n = m?.[1] ?? "?";
+    return `Published ${n} ${n === "1" ? "bundle" : "bundles"}`;
+  }
+  if (msg.startsWith("fetch_manifest OK")) {
+    const m = msg.match(/\((\d+) bundles/);
+    return `Fetched manifest (${m?.[1] ?? "?"} bundles)`;
+  }
+  if (msg.startsWith("fetch_manifest GET")) return null as unknown as string;
+  if (msg.startsWith("manifest parse failed")) return `Manifest parse error: ${msg.replace(/^manifest parse failed:\s*/, "")}`;
+  return msg;
+}
+
+interface ParsedLog {
+  iso: string;
+  level: string;
+  message: string;
+}
+
+function parseLogLine(line: string): ParsedLog | null {
+  // Format: "<rfc3339> <LEVEL> <message>"
+  const match = line.match(/^(\S+)\s+(\S+)\s+(.*)$/);
+  if (!match) return null;
+  const [, iso, level, rawMessage] = match;
+  const message = prettifyLogMessage(rawMessage);
+  if (!message) return null;
+  return { iso, level, message };
+}
+
+function RecentActivity() {
+  const [entries, setEntries] = useState<ParsedLog[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const lines = await readRecentLog(80);
+      const parsed = lines
+        .map(parseLogLine)
+        .filter((p): p is ParsedLog => p !== null)
+        .slice(0, 20);
+      setEntries(parsed);
+    } catch (e) {
+      console.warn("readRecentLog failed", e);
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[12px] text-muted">
+        Loading…
+      </div>
+    );
+  }
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[12px] text-muted">
+        Nothing yet — actions you take will show up here.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="flex items-center justify-between border-b border-border-soft bg-titlebar px-3 py-1">
+        <span className="text-[10px] tracking-wide text-muted">
+          {entries.length} most recent
+        </span>
+        <button
+          type="button"
+          onClick={() => void load()}
+          aria-label="Refresh activity"
+          className="rounded p-0.5 text-muted hover:bg-border-soft"
+        >
+          <IconRefresh size={12} stroke={2} />
+        </button>
+      </div>
+      <div className="max-h-[180px] overflow-y-auto">
+        {entries.map((entry, i) => (
+          <div
+            key={i}
+            className="flex items-start gap-2 border-b border-border-soft px-3 py-1.5 text-[12px] last:border-b-0"
+          >
+            <span
+              className={`shrink-0 tabular-nums text-[10px] mt-[2px] ${
+                entry.level === "ERROR" ? "text-error-fg" : "text-muted"
+              }`}
+            >
+              {formatLogTimestamp(entry.iso)}
+            </span>
+            <span
+              className={`flex-1 leading-snug ${
+                entry.level === "ERROR" ? "text-error-fg" : "text-ink"
+              }`}
+            >
+              {entry.message}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );

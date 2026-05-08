@@ -152,4 +152,5 @@ export const samplePersisted: PersistedState = {
   lastKnownManifest: null,
   publisher: {},
   publisherRepoPath: null,
+  disabledBundles: [],
 };

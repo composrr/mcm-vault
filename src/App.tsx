@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "./components/AppHeader";
 import { CategoryStrip, type CategoryFilter } from "./components/CategoryStrip";
 import { BundleList } from "./components/BundleList";
@@ -20,6 +20,7 @@ import {
   isTauri,
   openLogFolder,
   openVaultFolder,
+  revealBundleFolder,
   revealPath,
 } from "./lib/tauri";
 
@@ -65,6 +66,7 @@ function App() {
   const installOne = useAppStore((s) => s.installOne);
   const removeBundle = useAppStore((s) => s.removeBundle);
   const saveSettings = useAppStore((s) => s.saveSettings);
+  const toggleBundleDisabled = useAppStore((s) => s.toggleBundleDisabled);
   const runDiagnostics = useAppStore((s) => s.runDiagnostics);
   const markFirstRunComplete = useAppStore((s) => s.markFirstRunComplete);
 
@@ -95,19 +97,9 @@ function App() {
     };
   }, []);
 
-  const hasAutoUpdatedRef = useRef(false);
-  useEffect(() => {
-    if (hasAutoUpdatedRef.current) return;
-    if (isFirstRun) return;
-    if (!persisted.settings.autoUpdateOnLaunch) return;
-    if (fetchStatus !== "success") return;
-    hasAutoUpdatedRef.current = true;
-    const hasUpdates = allRows.some((r) => r.status === "update");
-    if (hasUpdates && !anyInstalling) {
-      void installAll();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchStatus, isFirstRun]);
+  // No auto-install. User clicks Update all (or per-bundle Reinstall) when they
+  // want to actually pull the new files. The scheduled timer below only refreshes
+  // the manifest so update statuses stay current.
 
   useEffect(() => {
     if (isFirstRun) return;
@@ -119,15 +111,11 @@ function App() {
     };
     const ms = intervalMs[persisted.settings.checkInterval] ?? intervalMs["4h"];
     const id = setInterval(() => {
-      void (async () => {
-        await refresh();
-        if (persisted.settings.autoUpdateOnLaunch) {
-          await installAll();
-        }
-      })();
+      // Scheduled re-fetch only; never auto-install. User triggers install manually.
+      void refresh();
     }, ms);
     return () => clearInterval(id);
-  }, [isFirstRun, persisted.settings.checkInterval, persisted.settings.autoUpdateOnLaunch, refresh, installAll]);
+  }, [isFirstRun, persisted.settings.checkInterval, refresh]);
 
   const allRows = useMemo(
     () => deriveRows(manifest, persisted, runtime),
@@ -142,7 +130,9 @@ function App() {
   const updatesAvailable = useMemo(
     () =>
       visibleRows.filter(
-        (row) => row.status === "update" || row.status === "notinstalled"
+        (row) =>
+          !row.disabled &&
+          (row.status === "update" || row.status === "notinstalled")
       ).length,
     [visibleRows]
   );
@@ -349,7 +339,17 @@ function App() {
           onReveal={() => {
             const installed = persisted.installedBundles[selectedBundle.id];
             const path = installed?.files[0];
-            if (path) void revealPath(path);
+            if (path) {
+              void revealPath(path);
+            } else {
+              // No installed files yet — open the canonical install dir for
+              // this bundle (created if missing).
+              void revealBundleFolder(
+                selectedBundle.category,
+                selectedBundle.presetType,
+                persisted.settings.folderLabel || "MCM Vault"
+              ).catch((e) => console.error("reveal_bundle_folder failed", e));
+            }
           }}
         />
       ) : (
@@ -364,7 +364,11 @@ function App() {
               No bundles to show.
             </div>
           ) : (
-            <BundleList rows={visibleRows} onRowClick={onRowClick} />
+            <BundleList
+              rows={visibleRows}
+              onRowClick={onRowClick}
+              onToggleDisabled={(id) => void toggleBundleDisabled(id)}
+            />
           )}
           <ActionBar
             updatesAvailable={updatesAvailable}
@@ -398,7 +402,15 @@ function App() {
           onReveal={() => {
             const installed = persisted.installedBundles[manualBundle.id];
             const path = installed?.files[0];
-            if (path) void revealPath(path);
+            if (path) {
+              void revealPath(path);
+            } else {
+              void revealBundleFolder(
+                manualBundle.category,
+                manualBundle.presetType,
+                persisted.settings.folderLabel || "MCM Vault"
+              ).catch((e) => console.error("reveal_bundle_folder failed", e));
+            }
             setManualModalBundleId(null);
           }}
         />

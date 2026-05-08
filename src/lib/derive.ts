@@ -35,6 +35,7 @@ export function deriveRows(
   runtime: Record<string, BundleRuntimeState> = {}
 ): BundleRowData[] {
   if (!manifest) return [];
+  const disabled = new Set(persisted.disabledBundles);
   return manifest.bundles.map((bundle) => {
     const r = runtime[bundle.id];
     const { status, installedVersion, errorMessage } = statusFor(
@@ -42,6 +43,12 @@ export function deriveRows(
       persisted,
       r
     );
-    return { bundle, status, installedVersion, errorMessage };
+    return {
+      bundle,
+      status,
+      installedVersion,
+      errorMessage,
+      disabled: disabled.has(bundle.id),
+    };
   });
 }

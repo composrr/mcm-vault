@@ -394,12 +394,12 @@ pub fn resolve_install_path(
         // Documents\Adobe\Adobe Media Encoder\<version>\Presets\. The legacy
         // Premiere Pro\<version>\Profile-<user>\Settings\EPR folder isn't scanned anymore.
         ("premiere", "export") => Ok(auto(ame_presets_path()?.to_string_lossy().to_string())),
-        ("premiere", "effect") => premiere_versioned_path(
-            &user,
-            &["Profile-", "/Effects Presets"],
-            "Premiere Pro",
-        )
-        .map(auto),
+        // Individual .prfpset files in Profile/Effects Presets/ aren't auto-scanned
+        // by Premiere — preset folder structure lives in the Effect Presets database
+        // file at the Profile root. Sharing requires right-click → Export Presets in
+        // Premiere, then teammates right-click → Import Presets. Sync via a known
+        // user-visible folder + show import instructions.
+        ("premiere", "effect") => Ok(manual(manual_premiere_effect_dir(folder_label)?)),
         ("premiere", "sequence") => premiere_versioned_path(
             &user,
             &["Profile-", "/Settings/Custom"],
@@ -573,6 +573,12 @@ fn manual_resolve_dir(folder_label: &str, subtype: &str) -> Result<PathBuf, Path
         .join(format!("{folder_label} Presets"))
         .join("Resolve")
         .join(subtype))
+}
+
+fn manual_premiere_effect_dir(folder_label: &str) -> Result<PathBuf, PathError> {
+    Ok(documents_dir()?
+        .join(format!("{folder_label} Presets"))
+        .join("Premiere Effect Bundles"))
 }
 
 #[tauri::command]
