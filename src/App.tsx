@@ -23,12 +23,27 @@ import {
   revealPath,
 } from "./lib/tauri";
 
-const APP_VERSION = "0.1.0";
-
 type View = "main" | "detail" | "settings" | "publish";
 
 function App() {
   const [filter, setFilter] = useState<CategoryFilter>("all");
+  const [appVersion, setAppVersion] = useState<string>("");
+
+  useEffect(() => {
+    if (!isTauri()) {
+      setAppVersion("dev");
+      return;
+    }
+    void (async () => {
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        setAppVersion(await getVersion());
+      } catch (e) {
+        console.warn("getVersion failed", e);
+        setAppVersion("?");
+      }
+    })();
+  }, []);
   const [view, setView] = useState<View>("main");
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(null);
   const [manualModalBundleId, setManualModalBundleId] = useState<string | null>(
@@ -243,7 +258,7 @@ function App() {
         <AppHeader />
         <SettingsPanel
           settings={persisted.settings}
-          appVersion={APP_VERSION}
+          appVersion={appVersion}
           onBack={() => setView("main")}
           onChange={(next) => void saveSettings(next)}
           onOpenLogFolder={async () => {
@@ -365,7 +380,7 @@ function App() {
             lastChecked={persisted.lastChecked}
             onRefresh={() => void refresh()}
             refreshing={fetchStatus === "loading"}
-            appVersion={APP_VERSION}
+            appVersion={appVersion}
           />
         </>
       )}
