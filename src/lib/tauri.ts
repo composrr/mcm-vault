@@ -5,7 +5,13 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import type { AppState, Bundle, Manifest, PublisherFile } from "../types";
+import type {
+  AppState,
+  Bundle,
+  Manifest,
+  PreviousInstall,
+  PublisherFile,
+} from "../types";
 
 export interface AppBranding {
   appName: string;
@@ -93,6 +99,7 @@ export interface InstallResult {
   installType: "auto" | "manual";
   installedFiles: string[];
   installDir: string;
+  previousInstall?: PreviousInstall;
 }
 
 export interface InstallProgress {
@@ -106,12 +113,28 @@ export async function scanHostApps(folderLabel: string): Promise<DiagnosticRepor
   return invoke<DiagnosticReport>("scan_host_apps", { folderLabel });
 }
 
+export interface InstallTargetVersions {
+  premierePro: DetectedVersion[];
+  adobeMediaEncoder: DetectedVersion[];
+  audition: DetectedVersion[];
+}
+
+export async function listInstallTargetVersions(): Promise<InstallTargetVersions> {
+  return invoke<InstallTargetVersions>("list_install_target_versions");
+}
+
 export async function installBundle(bundle: Bundle): Promise<InstallResult> {
   return invoke<InstallResult>("install_bundle", { bundle });
 }
 
 export async function uninstallBundle(files: string[]): Promise<number> {
   return invoke<number>("uninstall_bundle", { files });
+}
+
+export async function restorePreviousInstall(
+  previous: PreviousInstall
+): Promise<number> {
+  return invoke<number>("restore_previous_install", { previous });
 }
 
 export async function revealPath(path: string): Promise<void> {
@@ -167,6 +190,9 @@ export interface PublishPlan {
   sourcePath: string;
   /** File names the user has checked. Must all be present in sourcePath. */
   includedFileNames: string[];
+  /** Bundle's preset_type — backend uses it to apply repo-layout transforms
+   *  (e.g. keyboard files get a `win/` or `mac/` prefix in the manifest). */
+  presetType: string;
 }
 
 export interface PublishedBundle {

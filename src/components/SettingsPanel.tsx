@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { IconArrowLeft, IconRefresh, IconExternalLink } from "@tabler/icons-react";
-import type { AppSettings } from "../types";
-import { readRecentLog, type DiagnosticReport } from "../lib/tauri";
+import type { AppSettings, InstallTargets } from "../types";
+import {
+  listInstallTargetVersions,
+  readRecentLog,
+  type DetectedVersion,
+  type DiagnosticReport,
+  type InstallTargetVersions,
+} from "../lib/tauri";
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -149,6 +155,19 @@ export function SettingsPanel({
               Changing this won't move existing files; click <em>Update all</em> on the main view to reinstall to the new path.
             </div>
           </div>
+        </section>
+
+        <section>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">
+            INSTALL TARGETS
+          </div>
+          <InstallTargetsPicker
+            settings={settings}
+            onChange={(installTargets) =>
+              onChange({ ...settings, installTargets })
+            }
+            folderLabel={settings.folderLabel || "MCM Vault"}
+          />
         </section>
 
         <section>
@@ -352,6 +371,172 @@ function RecentActivity() {
             </span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+interface InstallTargetsPickerProps {
+  settings: AppSettings;
+  folderLabel: string;
+  onChange: (next: InstallTargets) => void;
+}
+
+function InstallTargetsPicker({
+  settings,
+  onChange,
+}: InstallTargetsPickerProps) {
+  const [detected, setDetected] = useState<InstallTargetVersions | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await listInstallTargetVersions();
+        if (cancelled) return;
+        setDetected(r);
+      } catch (e) {
+        if (cancelled) return;
+        setError(
+          typeof e === "object" && e && "message" in e
+            ? String((e as { message?: unknown }).message ?? e)
+            : String(e)
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const targets = settings.installTargets;
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] text-muted">
+        Scanning installed apps…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-error-border bg-error-row-bg px-3.5 py-2.5 text-[12px] text-error-fg">
+        Couldn't scan host apps: {error}
+      </div>
+    );
+  }
+  if (!detected) return null;
+
+  const noVersions =
+    detected.premierePro.length === 0 &&
+    detected.adobeMediaEncoder.length === 0 &&
+    detected.audition.length === 0;
+
+  if (noVersions) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] text-body">
+        No host-app version folders detected. Install targets only apply when
+        Premiere Pro, Adobe Media Encoder, or Audition is installed.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[12px] leading-relaxed text-body">
+        Pick which installed versions receive new files. Leave a row's checkboxes
+        empty for "highest version only" (the default).
+      </div>
+      <AppRow
+        label="Premiere Pro"
+        versions={detected.premierePro}
+        selected={targets.premierePro}
+        onChange={(next) => onChange({ ...targets, premierePro: next })}
+      />
+      <AppRow
+        label="Adobe Media Encoder"
+        versions={detected.adobeMediaEncoder}
+        selected={targets.adobeMediaEncoder}
+        onChange={(next) => onChange({ ...targets, adobeMediaEncoder: next })}
+      />
+      <AppRow
+        label="Audition"
+        versions={detected.audition}
+        selected={targets.audition}
+        onChange={(next) => onChange({ ...targets, audition: next })}
+      />
+    </div>
+  );
+}
+
+interface AppRowProps {
+  label: string;
+  versions: DetectedVersion[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}
+
+function AppRow({ label, versions, selected, onChange }: AppRowProps) {
+  if (versions.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 opacity-60">
+        <div className="text-[13px] font-medium text-ink">{label}</div>
+        <div className="mt-0.5 text-[11px] text-muted">Not installed</div>
+      </div>
+    );
+  }
+  const selectedSet = new Set(selected);
+  const toggle = (versionLabel: string) => {
+    const next = new Set(selectedSet);
+    if (next.has(versionLabel)) next.delete(versionLabel);
+    else next.add(versionLabel);
+    onChange(
+      Array.from(next).sort((a, b) =>
+        b.localeCompare(a, undefined, { numeric: true })
+      )
+    );
+  };
+  return (
+    <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="text-[13px] font-medium text-ink">{label}</div>
+        {selected.length === 0 ? (
+          <span className="rounded bg-border-soft px-1.5 py-0.5 text-[10px] tracking-wide text-muted">
+            HIGHEST ONLY
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-[11px] text-mcm-blue hover:underline"
+          >
+            Reset to highest only
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {versions.map((v) => {
+          const on = selectedSet.has(v.label);
+          return (
+            <button
+              key={v.label}
+              type="button"
+              onClick={() => toggle(v.label)}
+              className={`rounded-md border px-2.5 py-1 text-[12px] tabular-nums transition-colors ${
+                on
+                  ? "border-mcm-blue bg-mcm-blue text-white"
+                  : "border-border-strong bg-white text-ink hover:bg-border-soft"
+              }`}
+            >
+              v{v.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

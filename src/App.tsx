@@ -65,6 +65,7 @@ function App() {
   const installAll = useAppStore((s) => s.installAllUpdates);
   const installOne = useAppStore((s) => s.installOne);
   const removeBundle = useAppStore((s) => s.removeBundle);
+  const restoreBundle = useAppStore((s) => s.restoreBundle);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const toggleBundleDisabled = useAppStore((s) => s.toggleBundleDisabled);
   const runDiagnostics = useAppStore((s) => s.runDiagnostics);
@@ -337,19 +338,37 @@ function App() {
             setView("main");
           }}
           onReveal={() => {
+            // We want to open the install FOLDER, never a specific file (the
+            // file may have been renamed or removed since we tracked it).
+            // Derive the parent dir from the first tracked path and pass that
+            // to reveal_path. Fall back to the canonical install dir if we
+            // haven't installed anything yet.
             const installed = persisted.installedBundles[selectedBundle.id];
-            const path = installed?.files[0];
-            if (path) {
-              void revealPath(path);
+            const first = installed?.files[0];
+            const dir = first?.replace(/[\\/][^\\/]+$/, "");
+            if (dir) {
+              void revealPath(dir);
             } else {
-              // No installed files yet — open the canonical install dir for
-              // this bundle (created if missing).
               void revealBundleFolder(
                 selectedBundle.category,
                 selectedBundle.presetType,
                 persisted.settings.folderLabel || "MCM Vault"
               ).catch((e) => console.error("reveal_bundle_folder failed", e));
             }
+          }}
+          onRestore={() => {
+            const installed = persisted.installedBundles[selectedBundle.id];
+            const prev = installed?.previousInstall;
+            if (!prev) return;
+            const ok = window.confirm(
+              `Restore "${selectedBundle.name}" to v${prev.version}?\n\n` +
+                `This will overwrite the currently installed files with the ` +
+                `${prev.snapshotPaths.length} archived file${
+                  prev.snapshotPaths.length === 1 ? "" : "s"
+                }.`
+            );
+            if (!ok) return;
+            void restoreBundle(selectedBundle.id);
           }}
         />
       ) : (
@@ -401,9 +420,10 @@ function App() {
           onClose={() => setManualModalBundleId(null)}
           onReveal={() => {
             const installed = persisted.installedBundles[manualBundle.id];
-            const path = installed?.files[0];
-            if (path) {
-              void revealPath(path);
+            const first = installed?.files[0];
+            const dir = first?.replace(/[\\/][^\\/]+$/, "");
+            if (dir) {
+              void revealPath(dir);
             } else {
               void revealBundleFolder(
                 manualBundle.category,

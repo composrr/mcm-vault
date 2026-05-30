@@ -56,6 +56,10 @@ pub struct InstallResult {
     pub install_type: String,
     pub installed_files: Vec<String>,
     pub install_dir: String,
+    /// Snapshot of the previous install (if any). Frontend persists this in
+    /// state.installedBundles[id].previousInstall so the user can restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_install: Option<state::PreviousInstall>,
 }
 
 fn http_client() -> Result<reqwest::Client, InstallError> {
@@ -101,11 +105,103 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result
     Ok(())
 }
 
-async fn current_folder_label() -> String {
+async fn current_settings() -> (String, state::InstallTargets) {
     state::read_state()
         .await
-        .map(|s| s.settings.folder_label)
-        .unwrap_or_else(|_| "MCM Vault".into())
+        .map(|s| (s.settings.folder_label, s.settings.install_targets))
+        .unwrap_or_else(|_| ("MCM Vault".into(), state::InstallTargets::default()))
+}
+
+/// Per-file install routing. For most preset types this is a no-op (file
+/// installs to `base_install_dir/<name>`). For `keyboard` bundles, files carry
+/// a `win/` or `mac/` prefix in the manifest; the prefix is stripped and the
+/// file is routed into the matching `Win/` or `Mac/` subfolder of the Premiere
+/// profile. Files for the wrong platform return `None` and are skipped.
+fn route_for_file(
+    preset_type: &str,
+    base_install_dir: &Path,
+    file_name: &str,
+) -> Option<(PathBuf, String)> {
+    if preset_type == "keyboard" {
+        let normalized = file_name.replace('\\', "/");
+        if let Some(rest) = normalized.strip_prefix("win/") {
+            if cfg!(target_os = "windows") {
+                return Some((base_install_dir.join("Win"), rest.to_string()));
+            }
+            return None;
+        }
+        if let Some(rest) = normalized.strip_prefix("mac/") {
+            if cfg!(target_os = "macos") {
+                return Some((base_install_dir.join("Mac"), rest.to_string()));
+            }
+            return None;
+        }
+        // Keyboard bundle file without a platform prefix — skip rather than
+        // dumping it into Profile-<user> root.
+        return None;
+    }
+    Some((base_install_dir.to_path_buf(), file_name.to_string()))
+}
+
+async fn snapshot_previous(
+    bundle_id: &str,
+    prev_version: &str,
+    prev_files: &[String],
+) -> Result<Option<state::PreviousInstall>, InstallError> {
+    let existing: Vec<&String> = prev_files
+        .iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect();
+    if existing.is_empty() {
+        return Ok(None);
+    }
+    let snapshots = state::snapshots_dir().map_err(|e| InstallError::Path {
+        message: e.to_string(),
+    })?;
+    let bundle_root = snapshots.join(bundle_id);
+
+    // Only the most recent snapshot is reachable from state.installedBundles —
+    // older ones are orphaned. Wipe them before writing the new one so the
+    // snapshots directory doesn't grow unboundedly across many updates.
+    if bundle_root.exists() {
+        let _ = tokio::fs::remove_dir_all(&bundle_root).await;
+    }
+
+    let ts = chrono::Utc::now().timestamp_millis();
+    let safe_version = prev_version.replace(['.', '/', '\\'], "_");
+    let snap_dir = bundle_root.join(format!("{safe_version}_{ts}"));
+    tokio::fs::create_dir_all(&snap_dir)
+        .await
+        .map_err(|e| InstallError::Io {
+            message: e.to_string(),
+        })?;
+
+    let mut snapshot_paths = Vec::with_capacity(existing.len());
+    let mut original_paths = Vec::with_capacity(existing.len());
+    for (i, orig) in existing.iter().enumerate() {
+        let p = PathBuf::from(orig);
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+        let snap_name = format!("{i:03}__{name}");
+        let snap_path = snap_dir.join(&snap_name);
+        tokio::fs::copy(&p, &snap_path)
+            .await
+            .map_err(|e| InstallError::Io {
+                message: e.to_string(),
+            })?;
+        snapshot_paths.push(snap_path.to_string_lossy().to_string());
+        original_paths.push(orig.to_string());
+    }
+
+    Ok(Some(state::PreviousInstall {
+        version: prev_version.to_string(),
+        original_paths,
+        snapshot_paths,
+        archived_at: chrono::Utc::now().to_rfc3339(),
+    }))
 }
 
 #[tauri::command]
@@ -113,21 +209,45 @@ pub async fn install_bundle(
     window: Window,
     bundle: Bundle,
 ) -> Result<InstallResult, InstallError> {
-    let folder_label = current_folder_label().await;
-    let target =
-        path_resolver::resolve_install_path(&bundle.category, &bundle.preset_type, &folder_label)?;
-    let install_dir = PathBuf::from(&target.path);
+    let (folder_label, install_targets) = current_settings().await;
+
+    // Resolve all target install dirs (one per host-app version per
+    // install_targets setting; one for version-agnostic preset types).
+    let targets = path_resolver::resolve_install_paths(
+        &bundle.category,
+        &bundle.preset_type,
+        &folder_label,
+        &install_targets,
+    )?;
+
+    // Snapshot the previous install (if any) before overwriting.
+    let app_state = state::read_state().await.ok();
+    let previous_install = if let Some(s) = &app_state {
+        if let Some(prev) = s.installed_bundles.get(&bundle.id) {
+            snapshot_previous(&bundle.id, &prev.version, &prev.files).await?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     state::log_event(
         "INFO",
         format!(
-            "install_bundle id={} version={} files={} target={}",
+            "install_bundle id={} version={} files={} targets={}",
             bundle.id,
             bundle.version,
             bundle.files.len(),
-            install_dir.display()
+            targets
+                .iter()
+                .map(|t| t.path.as_str())
+                .collect::<Vec<_>>()
+                .join(" | ")
         ),
     );
 
+    // Download once into staging.
     let staging_root = state::app_data_dir()
         .map_err(|e| InstallError::Path {
             message: e.to_string(),
@@ -142,7 +262,7 @@ pub async fn install_bundle(
 
     let client = http_client()?;
     let total = bundle.files.len();
-    let mut staged: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(total);
+    let mut staged: Vec<(PathBuf, String)> = Vec::with_capacity(total);
 
     for (idx, file_name) in bundle.files.iter().enumerate() {
         let _ = window.emit(
@@ -156,36 +276,75 @@ pub async fn install_bundle(
         );
         let url = branding::bundle_file_url(&bundle.path, file_name);
         let staged_path = staging_root.join(file_name);
-        let final_path = install_dir.join(file_name);
         download_to(&client, &url, &staged_path).await.map_err(|e| {
             let _ = std::fs::remove_dir_all(&staging_root);
             e
         })?;
-        staged.push((staged_path, final_path));
+        staged.push((staged_path, file_name.clone()));
     }
 
-    tokio::fs::create_dir_all(&install_dir)
-        .await
-        .map_err(|e| InstallError::Io {
-            message: e.to_string(),
-        })?;
-
-    let mut installed_files = Vec::with_capacity(total);
-    for (src, dst) in &staged {
-        if let Some(parent) = dst.parent() {
-            tokio::fs::create_dir_all(parent)
+    // Copy the staged files into every target dir.
+    let mut installed_files = Vec::with_capacity(total * targets.len().max(1));
+    for target in &targets {
+        let install_dir = PathBuf::from(&target.path);
+        for (src, name) in &staged {
+            let Some((dst_dir, basename)) =
+                route_for_file(&bundle.preset_type, &install_dir, name)
+            else {
+                continue;
+            };
+            tokio::fs::create_dir_all(&dst_dir)
                 .await
                 .map_err(|e| InstallError::Io {
                     message: e.to_string(),
                 })?;
+            let dst = dst_dir.join(&basename);
+            tokio::fs::copy(src, &dst)
+                .await
+                .map_err(|e| InstallError::Io {
+                    message: e.to_string(),
+                })?;
+            installed_files.push(dst.to_string_lossy().to_string());
         }
-        tokio::fs::copy(src, dst).await.map_err(|e| InstallError::Io {
-            message: e.to_string(),
-        })?;
-        installed_files.push(dst.to_string_lossy().to_string());
     }
 
     let _ = tokio::fs::remove_dir_all(&staging_root).await;
+
+    // Clean up stale tracked files: anything we wrote in the prior install that
+    // isn't in this install. This catches renames so receivers don't end up
+    // with both old + new copies of the same preset. We only ever delete files
+    // we previously wrote (tracked in installed_bundles[id].files) — user-
+    // created files in the same folder are not touched. The previous install
+    // was already snapshotted above, so the Restore button brings these back
+    // if a maintainer publishes a bundle by mistake.
+    let mut removed_stale = 0usize;
+    if let Some(prev) = app_state
+        .as_ref()
+        .and_then(|s| s.installed_bundles.get(&bundle.id))
+    {
+        let new_set: std::collections::HashSet<&String> = installed_files.iter().collect();
+        for stale in prev.files.iter().filter(|p| !new_set.contains(*p)) {
+            let p = std::path::Path::new(stale);
+            if p.exists() {
+                match tokio::fs::remove_file(p).await {
+                    Ok(_) => removed_stale += 1,
+                    Err(e) => state::log_event(
+                        "WARN",
+                        format!("cleanup stale file failed: {stale}: {e}"),
+                    ),
+                }
+            }
+        }
+        if removed_stale > 0 {
+            state::log_event(
+                "INFO",
+                format!(
+                    "install_bundle id={} cleaned {removed_stale} stale file(s) from prior install",
+                    bundle.id
+                ),
+            );
+        }
+    }
 
     let _ = window.emit(
         "install-progress",
@@ -197,12 +356,71 @@ pub async fn install_bundle(
         },
     );
 
+    let first_target = targets
+        .first()
+        .map(|t| t.path.clone())
+        .unwrap_or_default();
+    let install_type = targets
+        .first()
+        .map(|t| t.install_type.clone())
+        .unwrap_or_else(|| "auto".into());
+
     Ok(InstallResult {
         bundle_id: bundle.id.clone(),
-        install_type: target.install_type,
+        install_type,
         installed_files,
-        install_dir: install_dir.to_string_lossy().to_string(),
+        install_dir: first_target,
+        previous_install,
     })
+}
+
+#[tauri::command]
+pub async fn restore_previous_install(
+    previous: state::PreviousInstall,
+) -> Result<usize, InstallError> {
+    let mut restored = 0usize;
+    for (snap, orig) in previous
+        .snapshot_paths
+        .iter()
+        .zip(previous.original_paths.iter())
+    {
+        let snap_path = PathBuf::from(snap);
+        if !snap_path.exists() {
+            continue;
+        }
+        let orig_path = PathBuf::from(orig);
+        if let Some(parent) = orig_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| InstallError::Io {
+                    message: e.to_string(),
+                })?;
+        }
+        tokio::fs::copy(&snap_path, &orig_path)
+            .await
+            .map_err(|e| InstallError::Io {
+                message: e.to_string(),
+            })?;
+        restored += 1;
+    }
+
+    // Snapshots are no longer referenced by state once the frontend clears
+    // previousInstall. Best-effort wipe of the parent dir so they don't leak.
+    if let Some(first) = previous.snapshot_paths.first() {
+        if let Some(snap_dir) = std::path::Path::new(first).parent() {
+            let _ = tokio::fs::remove_dir_all(snap_dir).await;
+            // Also remove the bundle_id parent dir if it's now empty.
+            if let Some(bundle_root) = snap_dir.parent() {
+                let _ = tokio::fs::remove_dir(bundle_root).await;
+            }
+        }
+    }
+
+    state::log_event(
+        "INFO",
+        format!("restore_previous_install version={} restored={restored}", previous.version),
+    );
+    Ok(restored)
 }
 
 #[tauri::command]
@@ -225,15 +443,21 @@ pub async fn uninstall_bundle(files: Vec<String>) -> Result<usize, InstallError>
 #[tauri::command]
 pub async fn reveal_path(path: String) -> Result<(), InstallError> {
     let target = PathBuf::from(&path);
-    let to_open = if target.is_file() {
-        target
-            .parent()
-            .map(PathBuf::from)
-            .unwrap_or(target)
+    // If the path points at a file that exists, open its parent folder.
+    // If the path is a dir that exists, open it.
+    // If the path doesn't exist (file was renamed/deleted since we tracked it),
+    // walk up the ancestry until we find a folder that does — never error out
+    // and never trigger Windows' "cannot find file" dialog.
+    let to_open: Option<PathBuf> = if target.is_file() {
+        target.parent().map(PathBuf::from)
+    } else if target.is_dir() {
+        Some(target.clone())
     } else {
-        target
+        target.ancestors().find(|p| p.exists()).map(PathBuf::from)
     };
-    let _ = open::that(to_open);
+    if let Some(p) = to_open {
+        let _ = open::that(p);
+    }
     Ok(())
 }
 

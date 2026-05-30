@@ -7,10 +7,37 @@ use crate::branding;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PreviousInstall {
+    pub version: String,
+    pub original_paths: Vec<String>,
+    pub snapshot_paths: Vec<String>,
+    pub archived_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstalledBundle {
     pub version: String,
     pub installed_at: String,
     pub files: Vec<String>,
+    /// Snapshot of the previous install for one-click restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_install: Option<PreviousInstall>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallTargets {
+    /// Empty Vec = "latest only" default. Non-empty = install to exactly these
+    /// version labels (e.g. ["26.0", "25.0"]). Only applies to host apps with
+    /// version-specific folders: Premiere Pro (sequence), Adobe Media Encoder
+    /// (export), Audition (audio).
+    #[serde(default)]
+    pub premiere_pro: Vec<String>,
+    #[serde(default)]
+    pub adobe_media_encoder: Vec<String>,
+    #[serde(default)]
+    pub audition: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +50,8 @@ pub struct Settings {
     pub folder_label: String,
     #[serde(default)]
     pub publisher_mode: bool,
+    #[serde(default)]
+    pub install_targets: InstallTargets,
 }
 
 fn default_folder_label() -> String {
@@ -37,6 +66,7 @@ impl Default for Settings {
             show_notifications: true,
             folder_label: default_folder_label(),
             publisher_mode: false,
+            install_targets: InstallTargets::default(),
         }
     }
 }
@@ -148,6 +178,10 @@ pub fn state_file_path() -> Result<PathBuf, StateError> {
 
 pub fn log_dir() -> Result<PathBuf, StateError> {
     Ok(app_data_dir()?.join("logs"))
+}
+
+pub fn snapshots_dir() -> Result<PathBuf, StateError> {
+    Ok(app_data_dir()?.join("snapshots"))
 }
 
 pub fn log_event(level: &str, message: impl AsRef<str>) {

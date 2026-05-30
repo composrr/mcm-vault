@@ -6,6 +6,7 @@ import {
   listenInstallProgress,
   notifyUser,
   readState,
+  restorePreviousInstall,
   scanHostApps,
   uninstallBundle,
   writeState,
@@ -32,6 +33,11 @@ const DEFAULT_PERSISTED_STATE: PersistedState = {
     showNotifications: true,
     folderLabel: "MCM Vault",
     publisherMode: false,
+    installTargets: {
+      premierePro: [],
+      adobeMediaEncoder: [],
+      audition: [],
+    },
   },
   dismissedTips: [],
   lastKnownManifest: null,
@@ -62,6 +68,7 @@ export interface AppStore {
   installOne: (bundle: Bundle) => Promise<void>;
   installAllUpdates: () => Promise<void>;
   removeBundle: (bundleId: string) => Promise<void>;
+  restoreBundle: (bundleId: string) => Promise<void>;
   saveSettings: (next: AppSettings) => Promise<void>;
   setPersisted: (patch: Partial<PersistedState>) => Promise<void>;
   toggleBundleDisabled: (bundleId: string) => Promise<void>;
@@ -189,10 +196,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // installBundle below; files removed from the bundle stay on disk and
       // are simply untracked. Explicit Remove still deletes via removeBundle.
       const result = await installBundle(bundle);
+      const prior = get().persisted.installedBundles[id];
       const installed: InstalledBundleState = {
         version: bundle.version,
         installedAt: new Date().toISOString(),
         files: result.installedFiles,
+        previousInstall:
+          result.previousInstall ?? prior?.previousInstall,
       };
       const installedBundles = {
         ...get().persisted.installedBundles,
@@ -256,6 +266,42 @@ export const useAppStore = create<AppStore>((set, get) => ({
     delete installedBundles[bundleId];
     const next = await persist(get, { installedBundles });
     set({ persisted: next });
+  },
+
+  async restoreBundle(bundleId: string) {
+    if (!isTauri()) return;
+    const installed = get().persisted.installedBundles[bundleId];
+    const prev = installed?.previousInstall;
+    if (!prev) return;
+    try {
+      await restorePreviousInstall(prev);
+      const restored: InstalledBundleState = {
+        version: prev.version,
+        installedAt: new Date().toISOString(),
+        files: prev.originalPaths,
+        previousInstall: undefined,
+      };
+      const installedBundles = {
+        ...get().persisted.installedBundles,
+        [bundleId]: restored,
+      };
+      const next = await persist(get, { installedBundles });
+      set({ persisted: next });
+    } catch (raw) {
+      const message =
+        typeof raw === "object" && raw && "message" in raw
+          ? String((raw as { message?: unknown }).message ?? raw)
+          : String(raw);
+      set((s) => ({
+        runtime: {
+          ...s.runtime,
+          [bundleId]: {
+            ...s.runtime[bundleId],
+            errorMessage: message,
+          },
+        },
+      }));
+    }
   },
 
   async saveSettings(settingsNext: AppSettings) {

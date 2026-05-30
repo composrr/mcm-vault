@@ -45,14 +45,21 @@ Recent fixes in order:
 13. Auto-update check on app launch (silent download + restart if newer signed build available)
 14. Tauri auto-updater plugin wired with minisign signing; GitHub Actions release workflow at `.github/workflows/release.yml` ships installers + updater manifest on every `v*` tag
 15. File logging to `<app data>/logs/app.log`; "Open log folder" in settings reveals it
+16. Multi-version install targets (Settings → Install Targets): user can opt to install Premiere/AME/Audition presets to additional versions instead of just the highest. Empty selection = "highest only" default.
+17. One-click "Restore previous version" on bundle detail view. Each install snapshots the prior version's files into `<app data>/MCMVault/snapshots/<bundleId>/<ver>_<ts>/`; restoring copies them back. Only the most recent snapshot per bundle is retained.
+18. Publisher seeding fix: `includedFiles` now always re-seeds from the fresh manifest's `bundle.files` ∩ local files on every scan, so files just-published from another machine show as checked rather than as accidental "will remove."
+19. **v0.1.8** — three new preset types:
+    - `workspace` → `Documents\Adobe\Premiere Pro\<ver>\Profile-<user>\Layouts\` (`.xml`, multi-version aware, cross-platform)
+    - `project-template` → `Documents\<label> Presets\Project Templates\` (`.prproj`, version-agnostic, cross-platform — relies on Premiere's File → Open Project rather than auto-discovery)
+    - `keyboard` → `Profile-<user>\Win\` or `\Mac\` (`.kys`). Bundle's manifest `files` carry a `win/` or `mac/` prefix; install resolver routes per current OS via `route_for_file` in `install.rs` (skips files for the wrong platform). Publisher uses `repo_name_for` to inject the prefix when writing manifest + repo, while keeping local-disk + state cache flat. Cross-platform publish coexists via the existing "preserve other-platform's files" cleanup rule (`is_local_platform_file`).
 
 ## Architecture notes
 
 - `src-tauri/src/branding.rs` — hardcoded `composrr/mcm-vault-presets`. Edit before building for a different team.
 - `src-tauri/src/manifest.rs` — `fetch_manifest` Tauri command. Cache-busts via `?_=<ts>` query.
 - `src-tauri/src/state.rs` — read/write JSON state. Schema in `AppState` struct. Includes `publisher: BTreeMap<bundleId, PublisherBundleState>` for publisher-side per-bundle tracking.
-- `src-tauri/src/path_resolver.rs` — resolves install paths per `(category, presetType, folderLabel)`. Detects highest installed Premiere/AME/Audition version. Only the highest version is targeted; older versions are not.
-- `src-tauri/src/install.rs` — `install_bundle` (download + copy), `uninstall_bundle` (used only by explicit Remove), `reveal_path`, `open_vault_folder`.
+- `src-tauri/src/path_resolver.rs` — resolves install paths per `(category, presetType, folderLabel, installTargets)` via `resolve_install_paths` (returns `Vec<ResolvedTarget>` — one per host-app version per the user's Install Targets setting; defaults to highest version only). Single-path `resolve_install_path` is still used for version-agnostic preset types.
+- `src-tauri/src/install.rs` — `install_bundle` (download + copy + snapshot prior install), `restore_previous_install` (copies snapshot back over current install), `uninstall_bundle` (used only by explicit Remove), `reveal_path`, `open_vault_folder`. Snapshots live at `<app data>/MCMVault/snapshots/<bundleId>/<ver>_<ts>/`; only the most recent per bundle is retained.
 - `src-tauri/src/publisher.rs` — `scan_publish_diffs` (returns added/modified/removed per bundle vs last-published baseline), `publish_bundles` (clones the presets repo to `%APPDATA%/MCMVault/publish/...`, mutates manifest, commits, pushes via shell-out to `git`), `publisher_default_source` (returns the canonical install path — same folder receive side targets).
 - `src/components/PublisherView.tsx` — main publisher UI. Bundle dropdown at top with "All preset bundles" default; below is the file list with checkboxes per bundle. Persisted `includedFiles` in `state.publisher[id]`.
 - `src/store/useAppStore.ts` — Zustand store. `installOne` no longer pre-uninstalls; just overwrites same names.

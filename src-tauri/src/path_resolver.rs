@@ -203,6 +203,13 @@ fn premiere_paths_for_version(version: &DetectedVersion, user: &str) -> Vec<Path
         ),
     ];
 
+    if let Ok(text_styles) = adobe_common_text_styles_path() {
+        out.push(check_path(
+            "Caption / text styles (.prtextstyle)",
+            &text_styles,
+        ));
+    }
+
     if let Ok(ame) = ame_presets_path() {
         out.push(check_path(
             "Export presets (.epr) — Adobe Media Encoder Presets",
@@ -377,9 +384,185 @@ pub fn scan_host_apps(folder_label: String) -> DiagnosticReport {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstallTargetVersions {
+    pub premiere_pro: Vec<DetectedVersion>,
+    pub adobe_media_encoder: Vec<DetectedVersion>,
+    pub audition: Vec<DetectedVersion>,
+}
+
+/// Lists installed version folders for each host app the user can target. Used
+/// by the Install Targets settings UI so the user can pick which versions
+/// receive new files.
+#[tauri::command]
+pub fn list_install_target_versions() -> InstallTargetVersions {
+    InstallTargetVersions {
+        premiere_pro: list_versions_for("Premiere Pro").unwrap_or_default(),
+        adobe_media_encoder: list_versions_for("Adobe Media Encoder").unwrap_or_default(),
+        audition: list_versions_for("Audition").unwrap_or_default(),
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolvedTarget {
     pub path: String,
     pub install_type: String,
+}
+
+/// Multi-target resolver. Returns one ResolvedTarget per host-app version that
+/// should receive this preset type. For version-agnostic preset types
+/// (LUTs, MOGRTs, Resolve LUTs/Fairlight), always returns exactly one target.
+/// For version-specific preset types (Premiere export → AME, sequence →
+/// Premiere Pro, audio → Audition), returns one per enabled version per
+/// `install_targets` setting; defaults to highest version when the setting is
+/// empty.
+pub fn resolve_install_paths(
+    category: &str,
+    preset_type: &str,
+    folder_label: &str,
+    install_targets: &crate::state::InstallTargets,
+) -> Result<Vec<ResolvedTarget>, PathError> {
+    let user = current_user();
+    match (category, preset_type) {
+        ("premiere", "export") => {
+            let versions = pick_versions(
+                list_versions_for("Adobe Media Encoder").unwrap_or_default(),
+                &install_targets.adobe_media_encoder,
+            );
+            if versions.is_empty() {
+                return Err(PathError::NoVersion {
+                    app: "Adobe Media Encoder".into(),
+                });
+            }
+            Ok(versions
+                .into_iter()
+                .map(|v| auto(PathBuf::from(v.root).join("Presets").to_string_lossy().to_string()))
+                .collect())
+        }
+        ("premiere", "sequence") => {
+            let versions = pick_versions(
+                list_versions_for("Premiere Pro").unwrap_or_default(),
+                &install_targets.premiere_pro,
+            );
+            if versions.is_empty() {
+                return Err(PathError::NoVersion {
+                    app: "Adobe Premiere Pro".into(),
+                });
+            }
+            Ok(versions
+                .into_iter()
+                .map(|v| {
+                    auto(
+                        PathBuf::from(v.root)
+                            .join(format!("Profile-{user}"))
+                            .join("Settings")
+                            .join("Custom")
+                            .to_string_lossy()
+                            .to_string(),
+                    )
+                })
+                .collect())
+        }
+        // ("premiere", "caption") is version-agnostic: lives under Adobe Common,
+        // not per-version Profile-<user>. Falls through to the `_` arm.
+        ("premiere", "audio") => {
+            let versions = pick_versions(
+                list_versions_for("Audition").unwrap_or_default(),
+                &install_targets.audition,
+            );
+            if versions.is_empty() {
+                return Err(PathError::NoVersion {
+                    app: "Adobe Audition".into(),
+                });
+            }
+            Ok(versions
+                .into_iter()
+                .map(|v| auto(PathBuf::from(v.root).join("Presets").to_string_lossy().to_string()))
+                .collect())
+        }
+        ("premiere", "workspace") => {
+            let versions = pick_versions(
+                list_versions_for("Premiere Pro").unwrap_or_default(),
+                &install_targets.premiere_pro,
+            );
+            if versions.is_empty() {
+                return Err(PathError::NoVersion {
+                    app: "Adobe Premiere Pro".into(),
+                });
+            }
+            Ok(versions
+                .into_iter()
+                .map(|v| {
+                    auto(
+                        PathBuf::from(v.root)
+                            .join(format!("Profile-{user}"))
+                            .join("Layouts")
+                            .to_string_lossy()
+                            .to_string(),
+                    )
+                })
+                .collect())
+        }
+        ("premiere", "keyboard") => {
+            // Returns the Profile-<user> dir as the *base*; install code routes
+            // each file into the Win/ or Mac/ subdir based on its `win/` or
+            // `mac/` prefix.
+            let versions = pick_versions(
+                list_versions_for("Premiere Pro").unwrap_or_default(),
+                &install_targets.premiere_pro,
+            );
+            if versions.is_empty() {
+                return Err(PathError::NoVersion {
+                    app: "Adobe Premiere Pro".into(),
+                });
+            }
+            Ok(versions
+                .into_iter()
+                .map(|v| {
+                    auto(
+                        PathBuf::from(v.root)
+                            .join(format!("Profile-{user}"))
+                            .to_string_lossy()
+                            .to_string(),
+                    )
+                })
+                .collect())
+        }
+        // Version-agnostic types: single target.
+        _ => Ok(vec![resolve_install_path(
+            category,
+            preset_type,
+            folder_label,
+        )?]),
+    }
+}
+
+/// Given the full list of detected versions and the user's enabled-versions
+/// list, return the versions to install to. Empty list = "default" = highest
+/// version only.
+fn pick_versions(
+    detected: Vec<DetectedVersion>,
+    enabled: &[String],
+) -> Vec<DetectedVersion> {
+    if detected.is_empty() {
+        return Vec::new();
+    }
+    if enabled.is_empty() {
+        return detected.into_iter().take(1).collect();
+    }
+    detected
+        .into_iter()
+        .filter(|v| enabled.iter().any(|e| e == &v.label))
+        .collect()
+}
+
+fn list_versions_for(app_subpath: &str) -> Result<Vec<DetectedVersion>, PathError> {
+    let parent = if app_subpath == "Adobe Media Encoder" {
+        documents_dir()?.join("Adobe").join("Adobe Media Encoder")
+    } else {
+        documents_dir()?.join("Adobe").join(app_subpath)
+    };
+    Ok(list_version_folders(&parent))
 }
 
 pub fn resolve_install_path(
@@ -406,6 +589,11 @@ pub fn resolve_install_path(
             "Premiere Pro",
         )
         .map(auto),
+        ("premiere", "caption") => Ok(auto(
+            adobe_common_text_styles_path()?
+                .to_string_lossy()
+                .to_string(),
+        )),
         ("premiere", "lumetri") => Ok(auto(
             adobe_common_lut_path("Creative")?.to_string_lossy().to_string(),
         )),
@@ -421,6 +609,24 @@ pub fn resolve_install_path(
                 .to_string(),
         )),
         ("premiere", "audio") => audition_versioned_path(&user).map(auto),
+        ("premiere", "workspace") => premiere_versioned_path(
+            &user,
+            &["Profile-", "/Layouts"],
+            "Premiere Pro",
+        )
+        .map(auto),
+        ("premiere", "keyboard") => {
+            // Publisher scans the OS-specific subfolder; install code uses
+            // resolve_install_paths (multi) and routes per-file from the parent.
+            let subfolder = if cfg!(target_os = "macos") { "Mac" } else { "Win" };
+            premiere_versioned_path(
+                &user,
+                &["Profile-", &format!("/{subfolder}")],
+                "Premiere Pro",
+            )
+            .map(auto)
+        }
+        ("premiere", "project-template") => Ok(manual(manual_project_template_dir(folder_label)?)),
         ("resolve", "lut") => Ok(auto(
             resolve_lut_path(folder_label)?.to_string_lossy().to_string(),
         )),
@@ -535,6 +741,26 @@ fn adobe_common_lut_path(kind: &str) -> Result<PathBuf, PathError> {
     }
 }
 
+fn adobe_common_text_styles_path() -> Result<PathBuf, PathError> {
+    // Caption Track Style files (.prtextstyle) live under Adobe Common, shared
+    // across all Premiere versions. No per-version Profile-<user> folder.
+    if cfg!(target_os = "windows") {
+        Ok(documents_dir()?
+            .join("Adobe")
+            .join("Common")
+            .join("Assets")
+            .join("Text Styles"))
+    } else {
+        Ok(home_dir()?
+            .join("Library")
+            .join("Application Support")
+            .join("Adobe")
+            .join("Common")
+            .join("Assets")
+            .join("Text Styles"))
+    }
+}
+
 fn resolve_lut_path(folder_label: &str) -> Result<PathBuf, PathError> {
     if cfg!(target_os = "windows") {
         Ok(programdata_dir()?
@@ -579,6 +805,12 @@ fn manual_premiere_effect_dir(folder_label: &str) -> Result<PathBuf, PathError> 
     Ok(documents_dir()?
         .join(format!("{folder_label} Presets"))
         .join("Premiere Effect Bundles"))
+}
+
+fn manual_project_template_dir(folder_label: &str) -> Result<PathBuf, PathError> {
+    Ok(documents_dir()?
+        .join(format!("{folder_label} Presets"))
+        .join("Project Templates"))
 }
 
 #[tauri::command]

@@ -36,7 +36,13 @@ export function deriveRows(
 ): BundleRowData[] {
   if (!manifest) return [];
   const disabled = new Set(persisted.disabledBundles);
-  return manifest.bundles.map((bundle) => {
+  // Group all Premiere bundles before Resolve. Stable inside each group so
+  // manifest order is preserved within a category.
+  const categoryRank = (c: string): number => (c === "premiere" ? 0 : 1);
+  const sorted = [...manifest.bundles].sort(
+    (a, b) => categoryRank(a.category) - categoryRank(b.category)
+  );
+  return sorted.map((bundle) => {
     const r = runtime[bundle.id];
     const { status, installedVersion, errorMessage } = statusFor(
       bundle,

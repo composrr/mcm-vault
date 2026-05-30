@@ -257,6 +257,59 @@ pub struct PublishPlan {
     /// Files in the existing manifest's bundle.files that are NOT locally present are
     /// preserved (they're owned by another machine).
     pub included_file_names: Vec<String>,
+    /// Bundle's preset_type — used to apply per-type repo-layout transforms
+    /// (e.g. `keyboard` files get a `win/` or `mac/` prefix based on current OS
+    /// when written into the repo + manifest).
+    #[serde(default)]
+    pub preset_type: String,
+}
+
+/// Translate a flat local file name into the path/key the manifest + repo use.
+/// For most preset types this is identity. For `keyboard`, prefixes the file
+/// with the current OS's subfolder name (`win/` or `mac/`) so the same bundle
+/// can carry separate Windows and macOS `.kys` files without collision.
+fn repo_name_for(preset_type: &str, local_name: &str) -> String {
+    if preset_type == "keyboard" {
+        let prefix = if cfg!(target_os = "macos") { "mac/" } else { "win/" };
+        format!("{prefix}{local_name}")
+    } else {
+        local_name.to_string()
+    }
+}
+
+/// True if `repo_name` is a file the current platform's publisher is
+/// responsible for (i.e. could have produced it from a local scan). Used to
+/// decide whether the repo-cleanup step is allowed to delete it; files owned
+/// by the other-platform maintainer must be left alone.
+fn is_local_platform_file(preset_type: &str, repo_name: &str) -> bool {
+    if preset_type != "keyboard" {
+        return true;
+    }
+    let normalized = repo_name.replace('\\', "/");
+    let my_prefix = if cfg!(target_os = "macos") { "mac/" } else { "win/" };
+    normalized.starts_with(my_prefix)
+}
+
+fn walk_repo_files(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    walk_repo_files_inner(root, root, &mut out);
+    out
+}
+
+fn walk_repo_files_inner(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            walk_repo_files_inner(root, &p, out);
+        } else if p.is_file() {
+            if let Ok(rel) = p.strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -346,10 +399,19 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
             })
             .unwrap_or_default();
 
+        let preset_type = plan.preset_type.as_str();
+
         // Scan local source folder so we know which files this machine has.
         let local_scan = scan_folder(&PathBuf::from(&plan.source_path));
         let local_names: std::collections::HashSet<String> =
             local_scan.iter().map(|f| f.name.clone()).collect();
+        // Same names projected into repo-space (with `win/`/`mac/` prefix for
+        // keyboard bundles) so cross-machine comparison vs current_manifest_files
+        // works regardless of the layout transform.
+        let local_repo_names: std::collections::HashSet<String> = local_scan
+            .iter()
+            .map(|f| repo_name_for(preset_type, &f.name))
+            .collect();
 
         // Validate: every name the user wants to publish must actually exist locally.
         for name in &plan.included_file_names {
@@ -368,15 +430,16 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
 
         // Cross-machine semantics:
         //   preserved = manifest files NOT locally present (other machines own them)
-        //   new files = preserved + included
+        //   new files = preserved + included (in repo-space)
         let mut new_bundle_files: Vec<String> = current_manifest_files
             .iter()
-            .filter(|name| !local_names.contains(*name))
+            .filter(|name| !local_repo_names.contains(*name))
             .cloned()
             .collect();
         for name in &plan.included_file_names {
-            if !new_bundle_files.contains(name) {
-                new_bundle_files.push(name.clone());
+            let repo_rel = repo_name_for(preset_type, name);
+            if !new_bundle_files.contains(&repo_rel) {
+                new_bundle_files.push(repo_rel);
             }
         }
         new_bundle_files.sort();
@@ -391,36 +454,48 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
         let want_in_repo: std::collections::HashSet<&String> =
             new_bundle_files.iter().collect();
 
-        // Sync repo's bundle folder against new_bundle_files.
-        if let Ok(read) = std::fs::read_dir(&target_dir) {
-            for entry in read.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                    continue;
-                };
-                if name.eq_ignore_ascii_case("_PLACEHOLDER.md") {
-                    continue;
-                }
-                if !want_in_repo.contains(&name.to_string()) {
-                    let _ = tokio::fs::remove_file(&path).await;
-                }
+        // Sync repo's bundle folder against new_bundle_files. Walk recursively
+        // so subdirs (e.g. keyboard's `win/`/`mac/`) are covered. Only delete
+        // files this machine "owns" — i.e. the ones the local platform could
+        // have produced — so a Windows publisher doesn't wipe Mac files and
+        // vice versa.
+        for rel in walk_repo_files(&target_dir) {
+            if rel.eq_ignore_ascii_case("_PLACEHOLDER.md") {
+                continue;
             }
+            if want_in_repo.contains(&rel) {
+                continue;
+            }
+            if !is_local_platform_file(preset_type, &rel) {
+                continue;
+            }
+            let _ = tokio::fs::remove_file(target_dir.join(&rel)).await;
         }
 
-        // Copy this machine's checked files into the repo (overwrite).
+        // Copy this machine's checked files into the repo (overwrite). Stored
+        // signatures use FLAT local names (matches what `scan_folder` returns
+        // on the next launch) so the diff comparison stays consistent with
+        // what the user sees in the publisher UI.
         let mut signatures: BTreeMap<String, state::PublisherFile> = BTreeMap::new();
         for f in &local_scan {
             if !included_set.contains(&f.name) {
                 continue;
             }
+            let repo_rel = repo_name_for(preset_type, &f.name);
             let src = PathBuf::from(&plan.source_path).join(&f.name);
-            let dst = target_dir.join(&f.name);
-            tokio::fs::copy(&src, &dst).await.map_err(|e| PublisherError::Io {
-                message: format!("copy {}: {e}", f.name),
-            })?;
+            let dst = target_dir.join(&repo_rel);
+            if let Some(parent) = dst.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| PublisherError::Io {
+                        message: e.to_string(),
+                    })?;
+            }
+            tokio::fs::copy(&src, &dst)
+                .await
+                .map_err(|e| PublisherError::Io {
+                    message: format!("copy {}: {e}", f.name),
+                })?;
             signatures.insert(
                 f.name.clone(),
                 state::PublisherFile {

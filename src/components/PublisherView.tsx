@@ -31,6 +31,25 @@ interface DiffStatus {
 
 const ALL = "__all__";
 
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad/i.test(navigator.userAgent);
+
+/** Manifest stores keyboard bundle files with a `win/` or `mac/` prefix; the
+ *  publisher scans flat names from a single OS-specific subfolder. Returns the
+ *  flat local-disk name, or null if this entry belongs to the other platform. */
+function repoNameToLocalName(presetType: string, repoName: string): string | null {
+  if (presetType !== "keyboard") return repoName;
+  const normalized = repoName.replace(/\\/g, "/");
+  if (normalized.startsWith("win/")) {
+    return IS_MAC ? null : normalized.slice(4);
+  }
+  if (normalized.startsWith("mac/")) {
+    return IS_MAC ? normalized.slice(4) : null;
+  }
+  return null;
+}
+
 export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
   const persisted = useAppStore((s) => s.persisted);
   const setPersisted = useAppStore((s) => s.setPersisted);
@@ -60,12 +79,18 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     setScanning(true);
     setPublishError(null);
     try {
-      // Read fresh state, not the closure — publish() calls scan() right after
-      // setPersisted, and the closure's `persisted` is still pre-publish.
-      const freshPublisher = useAppStore.getState().persisted.publisher;
+      // Read fresh state from the store, not closure values. After publish we
+      // refresh the manifest, and we want scan() to see the just-pushed
+      // bundle.files so the checkboxes reflect repo state immediately.
+      const freshState = useAppStore.getState();
+      const freshBundles = freshState.manifest?.bundles ?? bundles;
+      const freshPublisher = freshState.persisted.publisher;
+      const freshBundlesById: Record<string, Bundle> = Object.fromEntries(
+        freshBundles.map((b) => [b.id, b])
+      );
       const nextPublisher = { ...freshPublisher };
       const inputs = await Promise.all(
-        bundles.map(async (b) => {
+        freshBundles.map(async (b) => {
           const sourcePath = await publisherDefaultSource(b, folderLabel);
           const existing = freshPublisher[b.id];
           // First-time init: seed includedFiles after scan results arrive
@@ -87,14 +112,21 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
       );
       const results = await scanPublishDiffs(inputs);
 
-      // Seed includedFiles for any bundle that didn't have one yet.
+      // Always re-seed includedFiles from the fresh manifest's bundle.files
+      // intersected with locally present files. Defaults always reflect what's
+      // currently in the repo — so files just-published from this machine OR
+      // from another machine show up checked, not as accidental "will remove."
       for (const diff of results) {
-        const existing = freshPublisher[diff.bundleId];
-        if (existing?.includedFiles && existing.includedFiles.length > 0) continue;
-        const bundle = bundlesById[diff.bundleId];
+        const bundle = freshBundlesById[diff.bundleId];
         if (!bundle) continue;
         const localNames = new Set(diff.currentFiles.map((f) => f.name));
-        const seeded = bundle.files.filter((n) => localNames.has(n));
+        // Manifest names may carry a `win/`/`mac/` prefix for keyboard
+        // bundles. Map each manifest entry to its flat local-disk name (or
+        // null if it belongs to the other platform) before checking against
+        // the local scan.
+        const seeded = bundle.files
+          .map((n) => repoNameToLocalName(bundle.presetType, n))
+          .filter((n): n is string => n !== null && localNames.has(n));
         nextPublisher[diff.bundleId] = {
           ...nextPublisher[diff.bundleId],
           includedFiles: seeded,
@@ -198,6 +230,7 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
             bundleId: b.id,
             sourcePath: status?.diff.sourcePath ?? "",
             includedFileNames: Array.from(sel).sort(),
+            presetType: b.presetType,
           };
         });
       if (plans.length === 0) {

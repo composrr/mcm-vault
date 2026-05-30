@@ -9,7 +9,11 @@ export type PresetType =
   | "lut"
   | "audio"
   | "sequence"
+  | "caption"
   | "mogrt"
+  | "workspace"
+  | "keyboard"
+  | "project-template"
   | "fusion"
   | "fairlight"
   | "powergrade"
@@ -43,10 +47,24 @@ export type BundleStatusKind =
   | "error"
   | "installing";
 
+export interface PreviousInstall {
+  version: string;
+  originalPaths: string[];
+  snapshotPaths: string[];
+  archivedAt: string;
+}
+
 export interface InstalledBundleState {
   version: string;
   installedAt: string;
   files: string[];
+  previousInstall?: PreviousInstall;
+}
+
+export interface InstallTargets {
+  premierePro: string[];
+  adobeMediaEncoder: string[];
+  audition: string[];
 }
 
 export interface AppSettings {
@@ -55,6 +73,7 @@ export interface AppSettings {
   showNotifications: boolean;
   folderLabel: string;
   publisherMode: boolean;
+  installTargets: InstallTargets;
 }
 
 export interface PublisherFile {

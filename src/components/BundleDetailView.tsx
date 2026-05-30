@@ -1,5 +1,6 @@
 import {
   IconAlertTriangle,
+  IconArrowBackUp,
   IconArrowLeft,
   IconArrowUp,
   IconCheck,
@@ -23,6 +24,7 @@ interface BundleDetailViewProps {
   onReinstall: () => void;
   onRemove: () => void;
   onReveal: () => void;
+  onRestore?: () => void;
 }
 
 const PRESET_LABEL: Record<string, string> = {
@@ -32,7 +34,11 @@ const PRESET_LABEL: Record<string, string> = {
   lut: "LUT",
   audio: "Audio",
   sequence: "Sequence",
+  caption: "Caption",
   mogrt: "MOGRT",
+  workspace: "Workspace",
+  keyboard: "Keyboard",
+  "project-template": "Project Template",
   fusion: "Fusion",
   fairlight: "Audio",
   powergrade: "PowerGrade",
@@ -122,7 +128,10 @@ export function BundleDetailView({
   onReinstall,
   onRemove,
   onReveal,
+  onRestore,
 }: BundleDetailViewProps) {
+  const previous = installed?.previousInstall;
+  const canRestore = !!onRestore && !!previous;
   const categoryLabel =
     bundle.category === "premiere" ? "Premiere Pro" : "DaVinci Resolve";
   const presetLabel = PRESET_LABEL[bundle.presetType] ?? bundle.presetType;
@@ -224,39 +233,61 @@ export function BundleDetailView({
               <span className="text-muted">File count</span>
               <span className="text-ink">{installed.files.length}</span>
             </div>
+            {previous && (
+              <div className="flex justify-between py-1 text-[13px]">
+                <span className="text-muted">Previous version</span>
+                <span className="text-ink tabular-nums">
+                  v{previous.version} · {formatDate(previous.archivedAt)}
+                </span>
+              </div>
+            )}
           </div>
         </section>
       )}
 
-      <div className="mt-auto flex gap-2 border-t border-border bg-surface px-5 py-3.5">
-        <button
-          type="button"
-          onClick={onReinstall}
-          disabled={installing}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
-        >
-          <IconRefresh size={16} stroke={2} />
-          {installed ? "Reinstall" : "Install"}
-        </button>
-        {installed && (
+      <div className="mt-auto border-t border-border bg-surface px-5 py-3.5">
+        <div className="flex gap-2">
           <button
             type="button"
-            onClick={onReveal}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft"
-          >
-            <IconFolder size={16} stroke={2} />
-            Reveal files
-          </button>
-        )}
-        {installed && (
-          <button
-            type="button"
-            onClick={onRemove}
+            onClick={onReinstall}
             disabled={installing}
-            className="flex items-center justify-center gap-1.5 rounded-md border border-error-border bg-white px-3.5 py-2 text-[13px] text-error-fg hover:bg-error-row-bg disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
           >
-            <IconTrash size={16} stroke={2} />
-            Remove
+            <IconRefresh size={16} stroke={2} />
+            {installed ? "Reinstall" : "Install"}
+          </button>
+          {installed && (
+            <button
+              type="button"
+              onClick={onReveal}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft"
+            >
+              <IconFolder size={16} stroke={2} />
+              Reveal files
+            </button>
+          )}
+          {installed && (
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={installing}
+              className="flex items-center justify-center gap-1.5 rounded-md border border-error-border bg-white px-3.5 py-2 text-[13px] text-error-fg hover:bg-error-row-bg disabled:opacity-50"
+            >
+              <IconTrash size={16} stroke={2} />
+              Remove
+            </button>
+          )}
+        </div>
+        {canRestore && (
+          <button
+            type="button"
+            onClick={onRestore}
+            disabled={installing}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
+            title={`Restore v${previous!.version} archived ${formatDate(previous!.archivedAt)}`}
+          >
+            <IconArrowBackUp size={16} stroke={2} />
+            Restore previous version (v{previous!.version})
           </button>
         )}
       </div>
