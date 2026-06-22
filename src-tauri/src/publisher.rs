@@ -587,6 +587,56 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
     })
 }
 
+/// Undo the most recent publish by reverting that specific commit and pushing
+/// the revert. We revert the exact SHA (not just HEAD) so it still works if a
+/// teammate pushed after us — `git revert` creates a NEW commit that undoes the
+/// named one, restoring the prior manifest + bundle files without rewriting
+/// history. On conflict (the same files changed since) we abort cleanly and ask
+/// the maintainer to resolve manually rather than leave the repo half-reverted.
+#[tauri::command]
+pub async fn revert_last_publish(sha: String) -> Result<String, PublisherError> {
+    let trimmed = sha.trim();
+    if trimmed.is_empty() {
+        return Err(PublisherError::Git {
+            message: "no publish to revert".into(),
+        });
+    }
+    state::log_event("INFO", format!("revert_last_publish sha={trimmed}"));
+    let repo = ensure_repo_cloned().await?;
+
+    let revert_out = make_git_command(&["revert", "--no-edit", trimmed], &repo)
+        .output()
+        .await
+        .map_err(|e| PublisherError::Git {
+            message: format!("spawn git revert failed: {e}"),
+        })?;
+    if !revert_out.status.success() {
+        let stderr = String::from_utf8_lossy(&revert_out.stderr).to_string();
+        // Leave the working tree clean so the next publish/revert isn't blocked.
+        let _ = make_git_command(&["revert", "--abort"], &repo)
+            .output()
+            .await;
+        return Err(PublisherError::Git {
+            message: format!(
+                "couldn't auto-revert (the files likely changed since): {}",
+                stderr.lines().next_back().unwrap_or(&stderr)
+            ),
+        });
+    }
+
+    run_git(&repo, &["push", "origin", branding::REPO_BRANCH]).await?;
+    let new_sha = run_git(&repo, &["rev-parse", "HEAD"])
+        .await
+        .ok()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    state::log_event(
+        "INFO",
+        format!("revert_last_publish OK reverted={trimmed} new={new_sha}"),
+    );
+    Ok(new_sha)
+}
+
 #[tauri::command]
 pub fn publisher_default_source(
     bundle: Bundle,

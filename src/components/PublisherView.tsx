@@ -1,22 +1,51 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  IconChevronDown,
+  IconAlertTriangle,
+  IconArrowBackUp,
   IconCloudUpload,
   IconExternalLink,
   IconFolderOpen,
   IconLoader2,
   IconRefresh,
 } from "@tabler/icons-react";
-import type { Bundle } from "../types";
+import type { Bundle, PublisherBundleState } from "../types";
 import {
   publishBundles,
   publisherDefaultSource,
   revealPath,
+  revertLastPublish,
   scanPublishDiffs,
   type BundleDiff,
   type PublishPlan,
 } from "../lib/tauri";
 import { useAppStore } from "../store/useAppStore";
+
+function bumpPatch(v: string): string {
+  const parts = v.split(".");
+  if (parts.length === 2) {
+    const a = Number(parts[0]);
+    const b = Number(parts[1]);
+    if (Number.isInteger(a) && Number.isInteger(b)) return `${a}.${b + 1}`;
+  }
+  if (parts.length === 3) {
+    const a = Number(parts[0]);
+    const b = Number(parts[1]);
+    const c = Number(parts[2]);
+    if (Number.isInteger(a) && Number.isInteger(b) && Number.isInteger(c))
+      return `${a}.${b}.${c + 1}`;
+  }
+  return `${v}.1`;
+}
+
+interface BundleChangeSummary {
+  bundleId: string;
+  name: string;
+  oldVersion: string;
+  newVersion: string;
+  added: string[];
+  removed: string[];
+  modified: string[];
+}
 
 interface PublisherViewProps {
   bundles: Bundle[];
@@ -29,26 +58,26 @@ interface DiffStatus {
   publishedAt: string | null;
 }
 
-const ALL = "__all__";
-
 const IS_MAC =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad/i.test(navigator.userAgent);
 
-/** Manifest stores keyboard bundle files with a `win/` or `mac/` prefix; the
- *  publisher scans flat names from a single OS-specific subfolder. Returns the
- *  flat local-disk name, or null if this entry belongs to the other platform. */
 function repoNameToLocalName(presetType: string, repoName: string): string | null {
   if (presetType !== "keyboard") return repoName;
   const normalized = repoName.replace(/\\/g, "/");
-  if (normalized.startsWith("win/")) {
-    return IS_MAC ? null : normalized.slice(4);
-  }
-  if (normalized.startsWith("mac/")) {
-    return IS_MAC ? normalized.slice(4) : null;
-  }
+  if (normalized.startsWith("win/")) return IS_MAC ? null : normalized.slice(4);
+  if (normalized.startsWith("mac/")) return IS_MAC ? normalized.slice(4) : null;
   return null;
 }
+
+function formatError(e: unknown): string {
+  if (typeof e === "object" && e && "message" in e)
+    return String((e as { message?: unknown }).message ?? e);
+  if (typeof e === "string") return e;
+  return JSON.stringify(e);
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────
 
 export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
   const persisted = useAppStore((s) => s.persisted);
@@ -59,14 +88,14 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
-  const [activeBundleId, setActiveBundleId] = useState<string>(ALL);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  const [selectedBundleId, setSelectedBundleId] = useState<string>("");
 
   const publisherEntries = persisted.publisher;
 
-  // Read selection from persisted state.publisher[id].includedFiles.
   const selectedFor = (bundleId: string): Set<string> => {
-    const entry = publisherEntries[bundleId];
-    return new Set(entry?.includedFiles ?? []);
+    return new Set(persisted.publisher[bundleId]?.includedFiles ?? []);
   };
 
   const bundlesById = useMemo(() => {
@@ -79,9 +108,6 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     setScanning(true);
     setPublishError(null);
     try {
-      // Read fresh state from the store, not closure values. After publish we
-      // refresh the manifest, and we want scan() to see the just-pushed
-      // bundle.files so the checkboxes reflect repo state immediately.
       const freshState = useAppStore.getState();
       const freshBundles = freshState.manifest?.bundles ?? bundles;
       const freshPublisher = freshState.persisted.publisher;
@@ -93,9 +119,6 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
         freshBundles.map(async (b) => {
           const sourcePath = await publisherDefaultSource(b, folderLabel);
           const existing = freshPublisher[b.id];
-          // First-time init: seed includedFiles after scan results arrive
-          // (we need to know what's locally present to intersect with manifest).
-          // Default to empty here; the seed pass below populates new bundles.
           nextPublisher[b.id] = {
             sourcePath,
             lastPublishedFiles: existing?.lastPublishedFiles ?? {},
@@ -111,19 +134,10 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
         })
       );
       const results = await scanPublishDiffs(inputs);
-
-      // Always re-seed includedFiles from the fresh manifest's bundle.files
-      // intersected with locally present files. Defaults always reflect what's
-      // currently in the repo — so files just-published from this machine OR
-      // from another machine show up checked, not as accidental "will remove."
       for (const diff of results) {
         const bundle = freshBundlesById[diff.bundleId];
         if (!bundle) continue;
         const localNames = new Set(diff.currentFiles.map((f) => f.name));
-        // Manifest names may carry a `win/`/`mac/` prefix for keyboard
-        // bundles. Map each manifest entry to its flat local-disk name (or
-        // null if it belongs to the other platform) before checking against
-        // the local scan.
         const seeded = bundle.files
           .map((n) => repoNameToLocalName(bundle.presetType, n))
           .filter((n): n is string => n !== null && localNames.has(n));
@@ -133,7 +147,6 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
         };
       }
       setPersisted({ publisher: nextPublisher });
-
       const mapped: Record<string, DiffStatus> = {};
       for (const diff of results) {
         const entry = nextPublisher[diff.bundleId];
@@ -145,7 +158,6 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
       }
       setDiffs(mapped);
     } catch (e) {
-      console.error("Scan failed", e);
       setPublishError(formatError(e));
     } finally {
       setScanning(false);
@@ -162,18 +174,37 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     const cur = new Set(existing?.includedFiles ?? []);
     if (cur.has(fileName)) cur.delete(fileName);
     else cur.add(fileName);
-    const nextEntry = {
-      ...(existing ?? {
-        sourcePath: "",
-        lastPublishedFiles: {},
-        lastPublishedAt: null,
-        lastPublishedVersion: null,
-        includedFiles: [],
-      }),
-      includedFiles: Array.from(cur).sort(),
-    };
     setPersisted({
-      publisher: { ...persisted.publisher, [bundleId]: nextEntry },
+      publisher: {
+        ...persisted.publisher,
+        [bundleId]: {
+          ...(existing ?? {
+            sourcePath: "",
+            lastPublishedFiles: {},
+            lastPublishedAt: null,
+            lastPublishedVersion: null,
+            includedFiles: [],
+          }),
+          includedFiles: Array.from(cur).sort(),
+        },
+      },
+    });
+  };
+
+  const updateSourcePath = (bundleId: string, path: string) => {
+    setPersisted({
+      publisher: {
+        ...persisted.publisher,
+        [bundleId]: {
+          ...(persisted.publisher[bundleId] ?? {
+            sourcePath: "",
+            lastPublishedFiles: {},
+            lastPublishedAt: null,
+            lastPublishedVersion: null,
+          }),
+          sourcePath: path,
+        },
+      },
     });
   };
 
@@ -186,9 +217,7 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     const sel = selectedFor(bundleId);
     const manifestSet = new Set(bundle.files);
     for (const name of localNames) {
-      const inManifest = manifestSet.has(name);
-      const isSelected = sel.has(name);
-      if (inManifest !== isSelected) return true;
+      if (manifestSet.has(name) !== sel.has(name)) return true;
     }
     if (status.diff.modified.some((name) => sel.has(name))) return true;
     return false;
@@ -200,23 +229,61 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     [bundles, persisted.publisher, diffs]
   );
 
-  const updateSourcePath = (bundleId: string, path: string) => {
-    const next = {
-      ...persisted.publisher,
-      [bundleId]: {
-        ...(persisted.publisher[bundleId] ?? {
-          sourcePath: "",
-          lastPublishedFiles: {},
-          lastPublishedAt: null,
-          lastPublishedVersion: null,
-        }),
-        sourcePath: path,
-      },
-    };
-    setPersisted({ publisher: next });
+  const buildSummaries = (): BundleChangeSummary[] =>
+    bundles
+      .filter((b) => bundleHasChanges(b.id))
+      .map((b) => {
+        const status = diffs[b.id];
+        const sel = selectedFor(b.id);
+        const manifestSet = new Set(b.files);
+        const localFiles = status?.diff.currentFiles ?? [];
+        const modifiedSet = new Set(status?.diff.modified ?? []);
+        const added: string[] = [];
+        const removed: string[] = [];
+        const modified: string[] = [];
+        for (const f of localFiles) {
+          const inManifest = manifestSet.has(f.name);
+          const isSel = sel.has(f.name);
+          if (isSel && !inManifest) added.push(f.name);
+          else if (!isSel && inManifest) removed.push(f.name);
+          else if (isSel && modifiedSet.has(f.name)) modified.push(f.name);
+        }
+        return {
+          bundleId: b.id,
+          name: b.name,
+          oldVersion: b.version,
+          newVersion: bumpPatch(b.version),
+          added,
+          removed,
+          modified,
+        };
+      });
+
+  const revert = async () => {
+    const lp = persisted.lastPublish;
+    if (!lp) return;
+    setReverting(true);
+    setPublishError(null);
+    setPublishMessage(null);
+    try {
+      const newSha = await revertLastPublish(lp.sha);
+      await setPersisted({ lastPublish: null });
+      setPublishMessage(
+        `Reverted ${lp.summary}.${newSha ? ` Revert commit ${newSha.slice(0, 7)}.` : ""}`
+      );
+      try {
+        await useAppStore.getState().refreshManifest();
+      } catch {}
+      await scan();
+    } catch (e) {
+      setPublishError(formatError(e));
+    } finally {
+      setReverting(false);
+    }
   };
 
   const publish = async () => {
+    setShowConfirm(false);
     setPublishing(true);
     setPublishError(null);
     setPublishMessage(null);
@@ -253,111 +320,116 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
           lastPublishedVersion: p.newVersion,
         };
       }
-      await setPersisted({ publisher: updated });
+      const summaryText = result.published
+        .map((p) => `${bundlesById[p.bundleId]?.name ?? p.bundleId} → v${p.newVersion}`)
+        .join(", ");
+      await setPersisted({
+        publisher: updated,
+        lastPublish: result.commitSha
+          ? { sha: result.commitSha, summary: summaryText, publishedAt: nowIso }
+          : persisted.lastPublish,
+      });
       setPublishMessage(
-        `Published ${result.published.length} ${
-          result.published.length === 1 ? "bundle" : "bundles"
-        }.${result.commitSha ? ` Commit ${result.commitSha.slice(0, 7)}.` : ""}`
+        `Published ${result.published.length} ${result.published.length === 1 ? "bundle" : "bundles"}.${
+          result.commitSha ? ` Commit ${result.commitSha.slice(0, 7)}.` : ""
+        }`
       );
-      // Refresh manifest cache so the UI reflects the new bundle versions/files
-      // we just pushed (otherwise lastKnownManifest stays stale until next launch).
       try {
         await useAppStore.getState().refreshManifest();
-      } catch (e) {
-        console.warn("manifest refresh after publish failed", e);
-      }
+      } catch {}
       await scan();
     } catch (e) {
-      console.error("Publish failed", e);
       setPublishError(formatError(e));
     } finally {
       setPublishing(false);
     }
   };
 
-  const visibleBundles =
-    activeBundleId === ALL
-      ? bundles
-      : bundles.filter((b) => b.id === activeBundleId);
+  const premiereGroups = bundles.filter((b) => b.category === "premiere");
+  const resolveGroups = bundles.filter((b) => b.category === "resolve");
+  const selectedBundle = selectedBundleId ? bundlesById[selectedBundleId] ?? null : null;
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border bg-mcm-blue-tint px-5 py-2.5">
+    <div className="relative flex flex-1 flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 border-b border-border bg-surface px-5 py-3">
         <IconCloudUpload size={16} stroke={2} className="text-mcm-blue" />
-        <span className="text-[12px] text-mcm-blue">
-          Pick the files in each bundle, then Publish.
-        </span>
+        <span className="flex-1 text-[13px] font-medium text-ink">Publisher</span>
+        {totalChangedBundles > 0 && !scanning && (
+          <span className="rounded-full bg-mcm-blue px-2 py-0.5 text-[10px] font-medium text-white tabular-nums">
+            {totalChangedBundles} changed
+          </span>
+        )}
         <button
           type="button"
           onClick={() => void scan()}
           disabled={scanning}
-          className="ml-auto flex items-center gap-1 rounded-md p-1 text-[12px] text-mcm-blue hover:bg-white disabled:opacity-50"
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-mcm-blue hover:bg-mcm-blue-tint disabled:opacity-50"
         >
-          <IconRefresh
-            size={14}
-            stroke={2}
-            className={scanning ? "animate-spin" : ""}
-          />
-          Rescan
+          <IconRefresh size={14} stroke={2} className={scanning ? "animate-spin" : ""} />
+          {scanning ? "Scanning…" : "Rescan"}
         </button>
       </div>
 
-      <div className="flex items-center gap-2.5 border-b border-border bg-surface px-5 py-3">
-        <span className="text-[12px] text-body">Bundle</span>
-        <div className="relative flex-1">
-          <select
-            value={activeBundleId}
-            onChange={(e) => setActiveBundleId(e.target.value)}
-            className="w-full appearance-none rounded-md border border-border-strong bg-white px-3 py-1.5 pr-8 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
-            aria-label="Select bundle"
-          >
-            <option value={ALL}>All preset bundles</option>
-            {bundles.map((b) => {
-              const dirty = bundleHasChanges(b.id);
-              return (
+      {/* Bundle selector dropdown */}
+      <div className="border-b border-border bg-surface px-5 py-3">
+        <select
+          value={selectedBundleId}
+          onChange={(e) => setSelectedBundleId(e.target.value)}
+          className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+        >
+          <option value="">Select a bundle…</option>
+          {premiereGroups.length > 0 && (
+            <optgroup label="Premiere Pro">
+              {premiereGroups.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
-                  {dirty ? " ●" : ""}
+                  {bundleHasChanges(b.id) ? " ●" : ""}
                 </option>
-              );
-            })}
-          </select>
-          <IconChevronDown
-            size={16}
-            stroke={2}
-            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted"
-          />
-        </div>
-        {totalChangedBundles > 0 && (
-          <span className="whitespace-nowrap text-[11px] tabular-nums text-mcm-blue font-medium">
-            {totalChangedBundles}{" "}
-            {totalChangedBundles === 1 ? "bundle" : "bundles"} changed
-          </span>
-        )}
+              ))}
+            </optgroup>
+          )}
+          {resolveGroups.length > 0 && (
+            <optgroup label="DaVinci Resolve">
+              {resolveGroups.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                  {bundleHasChanges(b.id) ? " ●" : ""}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
       </div>
 
+      {/* Content area */}
       <div className="flex-1 overflow-y-auto">
-        {visibleBundles.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-[12px] text-muted">
-            No bundles available.
+        {!selectedBundle ? (
+          <div className="flex h-full items-center justify-center px-6 text-center">
+            <div>
+              <div className="text-[13px] text-body">
+                Select a bundle from the dropdown above
+              </div>
+              <div className="mt-1 text-[11.5px] text-muted">
+                Then choose which files to include before publishing to the team
+              </div>
+            </div>
           </div>
         ) : (
-          visibleBundles.map((bundle) => (
-            <BundlePanel
-              key={bundle.id}
-              bundle={bundle}
-              status={diffs[bundle.id] ?? null}
-              entry={publisherEntries[bundle.id] ?? null}
-              selected={selectedFor(bundle.id)}
-              dirty={bundleHasChanges(bundle.id)}
-              onToggleFile={(name) => toggleFile(bundle.id, name)}
-              onUpdateSourcePath={(path) => updateSourcePath(bundle.id, path)}
-              onReveal={(path) => void revealPath(path).catch(() => {})}
-            />
-          ))
+          <BundlePanel
+            bundle={selectedBundle}
+            status={diffs[selectedBundle.id] ?? null}
+            entry={publisherEntries[selectedBundle.id] ?? null}
+            selected={selectedFor(selectedBundle.id)}
+            dirty={bundleHasChanges(selectedBundle.id)}
+            onToggleFile={(name) => toggleFile(selectedBundle.id, name)}
+            onUpdateSourcePath={(path) => updateSourcePath(selectedBundle.id, path)}
+            onReveal={(path) => void revealPath(path).catch(() => {})}
+          />
         )}
       </div>
 
+      {/* Footer */}
       <div className="border-t border-border bg-surface px-5 py-3">
         {publishError && (
           <div className="mb-2 rounded-md border border-error-border bg-error-row-bg px-3 py-2 text-[12px] text-error-fg">
@@ -379,8 +451,8 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
         )}
         <button
           type="button"
-          onClick={() => void publish()}
-          disabled={publishing || totalChangedBundles === 0}
+          onClick={() => setShowConfirm(true)}
+          disabled={publishing || reverting || totalChangedBundles === 0}
           className="flex w-full items-center justify-center gap-1.5 rounded-md bg-mcm-blue px-4 py-2 text-[13px] font-medium text-white hover:bg-mcm-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {publishing ? (
@@ -392,17 +464,134 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
             ? "Publishing…"
             : totalChangedBundles === 0
               ? "No changes to publish"
-              : `Publish ${totalChangedBundles} ${totalChangedBundles === 1 ? "bundle" : "bundles"}`}
+              : `Publish ${totalChangedBundles} changed ${totalChangedBundles === 1 ? "bundle" : "bundles"}`}
         </button>
+        {persisted.lastPublish && (
+          <button
+            type="button"
+            onClick={() => void revert()}
+            disabled={publishing || reverting}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-4 py-2 text-[12px] text-body hover:bg-border-soft disabled:opacity-50"
+            title={`Undo: ${persisted.lastPublish.summary}`}
+          >
+            {reverting ? (
+              <IconLoader2 size={14} stroke={2} className="animate-spin" />
+            ) : (
+              <IconArrowBackUp size={14} stroke={2} />
+            )}
+            {reverting
+              ? "Reverting…"
+              : `Revert last publish (${persisted.lastPublish.summary})`}
+          </button>
+        )}
+      </div>
+
+      {showConfirm && (
+        <PublishConfirmDialog
+          summaries={buildSummaries()}
+          onCancel={() => setShowConfirm(false)}
+          onConfirm={() => void publish()}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Publish confirm dialog ────────────────────────────────────────────────
+
+interface PublishConfirmDialogProps {
+  summaries: BundleChangeSummary[];
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+function PublishConfirmDialog({ summaries, onCancel, onConfirm }: PublishConfirmDialogProps) {
+  const totalRemovals = summaries.reduce((n, s) => n + s.removed.length, 0);
+  const totalAdds = summaries.reduce((n, s) => n + s.added.length, 0);
+  const totalMods = summaries.reduce((n, s) => n + s.modified.length, 0);
+
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 px-5">
+      <div className="flex max-h-[85%] w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-white shadow-xl">
+        <div className="border-b border-border px-4 py-3">
+          <div className="text-[14px] font-semibold text-ink">Publish to the team?</div>
+          <div className="mt-0.5 text-[11px] text-muted">
+            {summaries.length} bundle{summaries.length === 1 ? "" : "s"} · {totalAdds} added ·{" "}
+            {totalRemovals} removed · {totalMods} modified
+          </div>
+        </div>
+
+        {totalRemovals > 0 && (
+          <div className="flex items-start gap-2 border-b border-error-border bg-error-row-bg px-4 py-2.5 text-[12px] text-error-fg">
+            <IconAlertTriangle size={15} stroke={2} className="mt-0.5 shrink-0" />
+            <span>
+              {totalRemovals} file{totalRemovals === 1 ? "" : "s"} will be{" "}
+              <strong>removed</strong> from the shared bundle. Teammates keep their local copies, but
+              the file leaves the repo. Double-check this is intentional.
+            </span>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto px-4 py-3">
+          {summaries.map((s) => (
+            <div
+              key={s.bundleId}
+              className="mb-3 last:mb-0 rounded-md border border-border bg-surface px-3 py-2.5"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="truncate text-[13px] font-medium text-ink">{s.name}</span>
+                <span className="shrink-0 tabular-nums text-[11px] text-muted">
+                  v{s.oldVersion} → <span className="text-mcm-blue">v{s.newVersion}</span>
+                </span>
+              </div>
+              <div className="mt-1.5 space-y-0.5">
+                {s.added.map((n) => (
+                  <div key={`a-${n}`} className="text-[11.5px] text-success-fg">+ {n}</div>
+                ))}
+                {s.modified.map((n) => (
+                  <div key={`m-${n}`} className="text-[11.5px] text-mcm-blue">~ {n}</div>
+                ))}
+                {s.removed.map((n) => (
+                  <div key={`r-${n}`} className="text-[11.5px] text-error-fg">− {n}</div>
+                ))}
+                {s.added.length === 0 && s.modified.length === 0 && s.removed.length === 0 && (
+                  <div className="text-[11.5px] text-muted">Version bump only</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-2 border-t border-border px-4 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-md border border-border-strong bg-white px-4 py-2 text-[13px] text-ink hover:bg-border-soft"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-[13px] font-medium text-white ${
+              totalRemovals > 0 ? "bg-error-fg hover:opacity-90" : "bg-mcm-blue hover:bg-mcm-blue-hover"
+            }`}
+          >
+            <IconCloudUpload size={15} stroke={2} />
+            {totalRemovals > 0 ? "Publish with removals" : "Publish"}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
+// ─── Bundle file picker panel ──────────────────────────────────────────────
+
 interface BundlePanelProps {
   bundle: Bundle;
   status: DiffStatus | null;
-  entry: import("../types").PublisherBundleState | null;
+  entry: PublisherBundleState | null;
   selected: Set<string>;
   dirty: boolean;
   onToggleFile: (fileName: string) => void;
@@ -444,34 +633,21 @@ function BundlePanel({
   ).length;
 
   return (
-    <div
-      className={`border-b border-border-soft px-5 py-3 ${
-        dirty ? "bg-update-row-bg" : ""
-      }`}
-    >
-      <div className="flex items-start gap-3">
+    <div className={`px-5 py-4 ${dirty ? "bg-update-row-bg" : ""}`}>
+      {/* Source folder row */}
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <div className="text-[14px] font-medium text-ink truncate">
-              {bundle.name}
-            </div>
-            <div className="text-[11px] tabular-nums text-muted">
-              v{bundle.version}
-            </div>
-          </div>
-          <div className="mt-0.5 text-[11px] text-muted">
-            {checkedCount} in bundle
-            {remoteOnly > 0 ? ` · ${remoteOnly} on other machine` : ""}
-            {entry?.lastPublishedVersion
-              ? ` · last pub v${entry.lastPublishedVersion}`
-              : ""}
+          <div className="text-[12px] text-body">
+            {checkedCount} of {localFiles.length} local files selected for bundle
+            {remoteOnly > 0 && (
+              <span className="ml-1.5 text-muted">· {remoteOnly} on another machine</span>
+            )}
           </div>
         </div>
         <button
           type="button"
           onClick={() => onReveal(sourcePath)}
-          className="shrink-0 flex items-center gap-1 rounded-md border border-border-strong bg-white px-2 py-1 text-[11px] text-body hover:bg-border-soft"
-          aria-label="Open source folder"
+          className="flex shrink-0 items-center gap-1 rounded-md border border-border-strong bg-white px-2.5 py-1.5 text-[12px] text-body hover:bg-border-soft"
           title={sourcePath}
         >
           <IconFolderOpen size={13} stroke={2} />
@@ -479,26 +655,25 @@ function BundlePanel({
         </button>
       </div>
 
+      {/* File list */}
       {status?.diff && !status.diff.sourceExists ? (
-        <div className="mt-2.5 rounded-md border border-warning-border bg-warning-bg px-3 py-2.5 text-[12px] text-warning-text">
-          <div className="font-medium mb-0.5">Source folder doesn't exist yet</div>
+        <div className="rounded-md border border-warning-border bg-warning-bg px-4 py-3 text-[12px] text-warning-text">
+          <div className="mb-0.5 font-medium">Source folder doesn't exist yet</div>
           <div className="text-[11px]">
-            Click <span className="font-medium">Open folder</span> above to
-            create it, then save a preset there from{" "}
-            {bundle.category === "premiere" ? "Premiere" : "Resolve"}.
+            Click <span className="font-medium">Open folder</span> above to create it, then save a
+            preset in {bundle.category === "premiere" ? "Premiere" : "Resolve"}.
           </div>
         </div>
       ) : localFiles.length === 0 ? (
-        <div className="mt-2.5 rounded-md border border-dashed border-border bg-surface px-3 py-3 text-center">
+        <div className="rounded-md border border-dashed border-border bg-surface px-4 py-4 text-center">
           <div className="text-[12px] text-body">No files yet</div>
           <div className="mt-0.5 text-[10.5px] text-muted">
-            Save a preset in{" "}
-            {bundle.category === "premiere" ? "Premiere" : "Resolve"} to the
+            Save a preset in {bundle.category === "premiere" ? "Premiere" : "Resolve"} to the
             source folder, then click <span className="font-medium">Rescan</span>.
           </div>
         </div>
       ) : (
-        <div className="mt-2.5 overflow-hidden rounded-md border border-border bg-white">
+        <div className="overflow-hidden rounded-md border border-border bg-white">
           {localFiles.map((f) => {
             const isSelected = selected.has(f.name);
             const inManifest = manifestSet.has(f.name);
@@ -544,9 +719,7 @@ function BundlePanel({
                 <span className="shrink-0 tabular-nums text-[10.5px] text-muted">
                   {formatBytes(f.size)}
                 </span>
-                <span
-                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusClass}`}
-                >
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusClass}`}>
                   {statusLabel}
                 </span>
               </label>
@@ -557,13 +730,13 @@ function BundlePanel({
 
       {remoteOnly > 0 && (
         <div className="mt-2 text-[10.5px] text-muted">
-          {remoteOnly} file{remoteOnly === 1 ? "" : "s"} live on another machine
-          and stay untouched.
+          {remoteOnly} file{remoteOnly === 1 ? "" : "s"} published from another machine — not
+          present locally and left untouched.
         </div>
       )}
 
-      <details className="mt-2 group">
-        <summary className="cursor-pointer text-[10.5px] text-muted hover:text-body select-none list-none">
+      <details className="mt-3 group">
+        <summary className="cursor-pointer select-none list-none text-[10.5px] text-muted hover:text-body">
           <span className="group-open:hidden">Show source path</span>
           <span className="hidden group-open:inline">Hide source path</span>
         </summary>
@@ -579,12 +752,4 @@ function BundlePanel({
       </details>
     </div>
   );
-}
-
-function formatError(e: unknown): string {
-  if (typeof e === "object" && e && "message" in e) {
-    return String((e as { message?: unknown }).message ?? e);
-  }
-  if (typeof e === "string") return e;
-  return JSON.stringify(e);
 }

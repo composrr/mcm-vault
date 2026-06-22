@@ -58,6 +58,19 @@ export async function openStateFolder(): Promise<string> {
   return invoke<string>("open_state_folder");
 }
 
+export async function exportMachineConfig(
+  contents: string,
+  folderLabel: string
+): Promise<string> {
+  return invoke<string>("export_machine_config", { contents, folderLabel });
+}
+
+export async function importMachineConfig(
+  folderLabel: string
+): Promise<string> {
+  return invoke<string>("import_machine_config", { folderLabel });
+}
+
 export async function openLogFolder(): Promise<string> {
   return invoke<string>("open_log_folder");
 }
@@ -123,8 +136,27 @@ export async function listInstallTargetVersions(): Promise<InstallTargetVersions
   return invoke<InstallTargetVersions>("list_install_target_versions");
 }
 
-export async function installBundle(bundle: Bundle): Promise<InstallResult> {
-  return invoke<InstallResult>("install_bundle", { bundle });
+export async function installBundle(
+  bundle: Bundle,
+  pathOverride?: string | null
+): Promise<InstallResult> {
+  return invoke<InstallResult>("install_bundle", {
+    bundle,
+    pathOverride: pathOverride ?? null,
+  });
+}
+
+export interface ResolvedTarget {
+  path: string;
+  installType: "auto" | "manual";
+}
+
+export async function resolveTarget(
+  category: string,
+  presetType: string,
+  folderLabel: string
+): Promise<ResolvedTarget> {
+  return invoke<ResolvedTarget>("resolve_target", { category, presetType, folderLabel });
 }
 
 export async function uninstallBundle(files: string[]): Promise<number> {
@@ -135,6 +167,12 @@ export async function restorePreviousInstall(
   previous: PreviousInstall
 ): Promise<number> {
   return invoke<number>("restore_previous_install", { previous });
+}
+
+/** Remove every installed file + app data on this machine. Returns the count
+ *  of installed files deleted. */
+export async function wipeThisMachine(): Promise<number> {
+  return invoke<number>("wipe_this_machine");
 }
 
 export async function revealPath(path: string): Promise<void> {
@@ -219,6 +257,12 @@ export async function publisherDefaultSource(
   folderLabel: string
 ): Promise<string> {
   return invoke<string>("publisher_default_source", { bundle, folderLabel });
+}
+
+/** Revert a specific publish commit and push the revert. Returns the new
+ *  revert commit SHA. Throws if the revert conflicts (files changed since). */
+export async function revertLastPublish(sha: string): Promise<string> {
+  return invoke<string>("revert_last_publish", { sha });
 }
 
 export async function listenInstallProgress(

@@ -31,6 +31,8 @@ pub fn run() {
             state::read_state,
             state::write_state,
             state::open_state_folder,
+            state::export_machine_config,
+            state::import_machine_config,
             state::open_log_folder,
             state::read_recent_log,
             path_resolver::scan_host_apps,
@@ -42,9 +44,11 @@ pub fn run() {
             install::open_vault_folder,
             install::reveal_bundle_folder,
             install::restore_previous_install,
+            install::wipe_this_machine,
             publisher::scan_publish_diffs,
             publisher::publish_bundles,
             publisher::publisher_default_source,
+            publisher::revert_last_publish,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

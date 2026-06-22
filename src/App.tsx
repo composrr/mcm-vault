@@ -66,6 +66,7 @@ function App() {
   const installOne = useAppStore((s) => s.installOne);
   const removeBundle = useAppStore((s) => s.removeBundle);
   const restoreBundle = useAppStore((s) => s.restoreBundle);
+  const markBundleImported = useAppStore((s) => s.markBundleImported);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const toggleBundleDisabled = useAppStore((s) => s.toggleBundleDisabled);
   const runDiagnostics = useAppStore((s) => s.runDiagnostics);
@@ -411,6 +412,8 @@ function App() {
       {manualBundle && (
         <ManualImportModal
           bundle={manualBundle}
+          imported={persisted.imported[manualBundle.id] ?? null}
+          onMarkImported={() => void markBundleImported(manualBundle.id)}
           syncPath={
             persisted.installedBundles[manualBundle.id]?.files[0]?.replace(
               /[\\/][^\\/]+$/,

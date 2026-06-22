@@ -309,8 +309,8 @@ fn detect_resolve(folder_label: &str) -> AppDetection {
                 .join("LUT");
             installed_signal |= lut_root.exists();
             paths.push(check_path(
-                &format!("Resolve LUTs (.cube, .3dl) — {folder_label} folder"),
-                &lut_root.join(folder_label),
+                "Resolve LUTs (.cube, .3dl) — root LUT folder",
+                &lut_root,
             ));
         }
         if let Ok(ad) = appdata_roaming() {
@@ -334,12 +334,11 @@ fn detect_resolve(folder_label: &str) -> AppDetection {
             let bmd = ad.join("Blackmagic Design").join("DaVinci Resolve");
             installed_signal |= bmd.exists();
             paths.push(check_path(
-                &format!("Resolve LUTs (.cube, .3dl) — {folder_label} folder"),
+                "Resolve LUTs (.cube, .3dl) — root LUT folder",
                 &ad
                     .join("Blackmagic Design")
                     .join("DaVinci Resolve")
-                    .join("LUT")
-                    .join(folder_label),
+                    .join("LUT"),
             ));
             paths.push(check_path(
                 "Fusion templates (.setting)",
@@ -628,7 +627,7 @@ pub fn resolve_install_path(
         }
         ("premiere", "project-template") => Ok(manual(manual_project_template_dir(folder_label)?)),
         ("resolve", "lut") => Ok(auto(
-            resolve_lut_path(folder_label)?.to_string_lossy().to_string(),
+            resolve_lut_path()?.to_string_lossy().to_string(),
         )),
         ("resolve", "fusion") => Ok(auto(
             resolve_support_dir()?
@@ -761,23 +760,23 @@ fn adobe_common_text_styles_path() -> Result<PathBuf, PathError> {
     }
 }
 
-fn resolve_lut_path(folder_label: &str) -> Result<PathBuf, PathError> {
+fn resolve_lut_path() -> Result<PathBuf, PathError> {
+    // Install to the root LUT folder — no <label> subfolder — so team LUTs
+    // appear alongside the user's personal LUTs in Resolve's browser rather
+    // than in a separate named group.
     if cfg!(target_os = "windows") {
         Ok(programdata_dir()?
             .join("Blackmagic Design")
             .join("DaVinci Resolve")
             .join("Support")
-            .join("LUT")
-            .join(folder_label))
+            .join("LUT"))
     } else {
-        // Use the per-user Resolve LUT folder so installs don't need admin rights.
         Ok(home_dir()?
             .join("Library")
             .join("Application Support")
             .join("Blackmagic Design")
             .join("DaVinci Resolve")
-            .join("LUT")
-            .join(folder_label))
+            .join("LUT"))
     }
 }
 

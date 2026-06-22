@@ -1,6 +1,8 @@
-import { create } from "zustand";
+﻿import { create } from "zustand";
 import {
+  exportMachineConfig,
   fetchManifest,
+  importMachineConfig,
   installBundle,
   isTauri,
   listenInstallProgress,
@@ -9,6 +11,7 @@ import {
   restorePreviousInstall,
   scanHostApps,
   uninstallBundle,
+  wipeThisMachine,
   writeState,
   type DiagnosticReport,
   type InstallProgress,
@@ -19,8 +22,10 @@ import type {
   AppState as PersistedState,
   Bundle,
   InstalledBundleState,
+  MachineConfig,
   Manifest,
 } from "../types";
+import { buildMachineConfig, configFingerprint } from "../lib/machineConfig";
 
 const DEFAULT_PERSISTED_STATE: PersistedState = {
   schemaVersion: 1,
@@ -43,7 +48,12 @@ const DEFAULT_PERSISTED_STATE: PersistedState = {
   lastKnownManifest: null,
   publisher: {},
   publisherRepoPath: null,
+  lastPublish: null,
+  imported: {},
+  configSyncedAt: null,
+  configFingerprint: null,
   disabledBundles: [],
+  pathOverrides: {},
 };
 
 export type FetchStatus = "idle" | "loading" | "success" | "offline" | "error";
@@ -69,9 +79,15 @@ export interface AppStore {
   installAllUpdates: () => Promise<void>;
   removeBundle: (bundleId: string) => Promise<void>;
   restoreBundle: (bundleId: string) => Promise<void>;
+  markBundleImported: (bundleId: string) => Promise<void>;
+  wipeMachine: () => Promise<number>;
   saveSettings: (next: AppSettings) => Promise<void>;
+  exportConfig: () => Promise<string>;
+  importConfig: () => Promise<MachineConfig>;
   setPersisted: (patch: Partial<PersistedState>) => Promise<void>;
   toggleBundleDisabled: (bundleId: string) => Promise<void>;
+  setPathOverride: (key: string, path: string) => Promise<void>;
+  resetPathOverride: (key: string) => Promise<void>;
   runDiagnostics: () => Promise<DiagnosticReport>;
   markFirstRunComplete: () => void;
 }
@@ -195,7 +211,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Never auto-delete files on update. Same-name files get overwritten by
       // installBundle below; files removed from the bundle stay on disk and
       // are simply untracked. Explicit Remove still deletes via removeBundle.
-      const result = await installBundle(bundle);
+      const overrideKey = `${bundle.category}:${bundle.presetType}`;
+      const pathOverride = get().persisted.pathOverrides[overrideKey] ?? null;
+      const result = await installBundle(bundle, pathOverride);
       const prior = get().persisted.installedBundles[id];
       const installed: InstalledBundleState = {
         version: bundle.version,
@@ -304,9 +322,74 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
+  async markBundleImported(bundleId: string) {
+    const bundle = get().manifest?.bundles.find((b) => b.id === bundleId);
+    if (!bundle) return;
+    const imported = {
+      ...get().persisted.imported,
+      [bundleId]: {
+        version: bundle.version,
+        files: bundle.files,
+        importedAt: new Date().toISOString(),
+      },
+    };
+    const next = await persist(get, { imported });
+    set({ persisted: next });
+  },
+
+  async wipeMachine() {
+    if (!isTauri()) return 0;
+    const count = await wipeThisMachine();
+    // Reset in-memory state. The app data dir (incl. state.json) is gone, so we
+    // drop back to a clean slate; the bundle list still renders (from the
+    // in-memory manifest) but everything shows "not installed."
+    set({
+      persisted: { ...DEFAULT_PERSISTED_STATE },
+      runtime: {},
+      diagnostics: null,
+    });
+    return count;
+  },
+
   async saveSettings(settingsNext: AppSettings) {
     const next = await persist(get, { settings: settingsNext });
     set({ persisted: next });
+  },
+
+  async exportConfig() {
+    const cfg = buildMachineConfig(get().persisted);
+    const label = get().persisted.settings.folderLabel || "MCM Vault";
+    const path = await exportMachineConfig(JSON.stringify(cfg, null, 2), label);
+    const next = await persist(get, {
+      configSyncedAt: new Date().toISOString(),
+      configFingerprint: configFingerprint(cfg),
+    });
+    set({ persisted: next });
+    return path;
+  },
+
+  async importConfig() {
+    const label = get().persisted.settings.folderLabel || "MCM Vault";
+    const raw = await importMachineConfig(label);
+    const cfg = JSON.parse(raw) as MachineConfig;
+    const cur = get().persisted.settings;
+    const nextSettings: AppSettings = {
+      ...cur,
+      folderLabel: cfg.folderLabel ?? cur.folderLabel,
+      installTargets: cfg.installTargets ?? cur.installTargets,
+      checkInterval: cfg.checkInterval ?? cur.checkInterval,
+      showNotifications: cfg.showNotifications ?? cur.showNotifications,
+      autoUpdateOnLaunch: cfg.autoUpdateOnLaunch ?? cur.autoUpdateOnLaunch,
+    };
+    const nextDisabled = cfg.disabledBundles ?? get().persisted.disabledBundles;
+    const next = await persist(get, {
+      settings: nextSettings,
+      disabledBundles: nextDisabled,
+      configSyncedAt: new Date().toISOString(),
+      configFingerprint: configFingerprint(cfg),
+    });
+    set({ persisted: next });
+    return cfg;
   },
 
   async setPersisted(patch: Partial<PersistedState>) {
@@ -321,6 +404,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const next = await persist(get, {
       disabledBundles: Array.from(cur).sort(),
     });
+    set({ persisted: next });
+  },
+
+  async setPathOverride(key: string, path: string) {
+    const overrides = { ...get().persisted.pathOverrides, [key]: path };
+    const next = await persist(get, { pathOverrides: overrides });
+    set({ persisted: next });
+  },
+
+  async resetPathOverride(key: string) {
+    const overrides = { ...get().persisted.pathOverrides };
+    delete overrides[key];
+    const next = await persist(get, { pathOverrides: overrides });
     set({ persisted: next });
   },
 
@@ -364,3 +460,4 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ isFirstRun: false });
   },
 }));
+

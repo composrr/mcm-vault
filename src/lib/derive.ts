@@ -49,12 +49,21 @@ export function deriveRows(
       persisted,
       r
     );
+    // Manual-import bundles: files on disk being current ("installed") doesn't
+    // mean the user has imported them into the host app. Surface that.
+    let importStatus: BundleRowData["importStatus"];
+    if (bundle.installType === "manual" && status === "installed") {
+      const imp = persisted.imported[bundle.id];
+      importStatus =
+        imp && imp.version === bundle.version ? "imported" : "needsimport";
+    }
     return {
       bundle,
       status,
       installedVersion,
       errorMessage,
       disabled: disabled.has(bundle.id),
+      importStatus,
     };
   });
 }

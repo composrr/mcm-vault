@@ -1,13 +1,28 @@
 import { useEffect, useState } from "react";
-import { IconArrowLeft, IconRefresh, IconExternalLink } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconRefresh,
+  IconExternalLink,
+  IconDeviceLaptop,
+  IconCheck,
+  IconAlertTriangle,
+  IconUpload,
+  IconDownload,
+  IconTrash,
+  IconPencil,
+  IconX,
+} from "@tabler/icons-react";
 import type { AppSettings, InstallTargets } from "../types";
 import {
   listInstallTargetVersions,
   readRecentLog,
+  resolveTarget,
   type DetectedVersion,
   type DiagnosticReport,
   type InstallTargetVersions,
 } from "../lib/tauri";
+import { useAppStore } from "../store/useAppStore";
+import { buildMachineConfig, configFingerprint } from "../lib/machineConfig";
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -158,6 +173,11 @@ export function SettingsPanel({
         </section>
 
         <section>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">CUSTOM PATHS</div>
+          <CustomPathsSection folderLabel={settings.folderLabel || "MCM Vault"} />
+        </section>
+
+        <section>
           <div className="mb-2 text-[11px] tracking-wide text-muted">
             INSTALL TARGETS
           </div>
@@ -168,6 +188,13 @@ export function SettingsPanel({
             }
             folderLabel={settings.folderLabel || "MCM Vault"}
           />
+        </section>
+
+        <section>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">
+            SYNC ACROSS MACHINES
+          </div>
+          <SyncAcrossMachines />
         </section>
 
         <section>
@@ -220,6 +247,13 @@ export function SettingsPanel({
         <section>
           <div className="mb-2 text-[11px] tracking-wide text-muted">APP UPDATES</div>
           <AppUpdateButton />
+        </section>
+
+        <section>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">
+            LEAVING THIS MACHINE
+          </div>
+          <WipeMachineSection />
         </section>
 
         <section>
@@ -503,21 +537,33 @@ function AppRow({ label, versions, selected, onChange }: AppRowProps) {
   };
   return (
     <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
-      <div className="mb-1.5 flex items-center justify-between">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="text-[13px] font-medium text-ink">{label}</div>
-        {selected.length === 0 ? (
-          <span className="rounded bg-border-soft px-1.5 py-0.5 text-[10px] tracking-wide text-muted">
-            HIGHEST ONLY
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => onChange([])}
-            className="text-[11px] text-mcm-blue hover:underline"
-          >
-            Reset to highest only
-          </button>
-        )}
+        <div className="flex items-center gap-2.5">
+          {selected.length === 0 && (
+            <span className="rounded bg-border-soft px-1.5 py-0.5 text-[10px] tracking-wide text-muted">
+              HIGHEST ONLY
+            </span>
+          )}
+          {selected.length < versions.length && (
+            <button
+              type="button"
+              onClick={() => onChange(versions.map((v) => v.label))}
+              className="text-[11px] text-mcm-blue hover:underline"
+            >
+              All versions
+            </button>
+          )}
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="text-[11px] text-mcm-blue hover:underline"
+            >
+              Highest only
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {versions.map((v) => {
@@ -535,6 +581,391 @@ function AppRow({ label, versions, selected, onChange }: AppRowProps) {
             >
               v{v.label}
             </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatSyncDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function SyncAcrossMachines() {
+  const persisted = useAppStore((s) => s.persisted);
+  const exportConfig = useAppStore((s) => s.exportConfig);
+  const importConfig = useAppStore((s) => s.importConfig);
+
+  const [busy, setBusy] = useState<"idle" | "export" | "import">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const currentFingerprint = configFingerprint(buildMachineConfig(persisted));
+  const synced = persisted.configSyncedAt != null;
+  const inSync = synced && persisted.configFingerprint === currentFingerprint;
+
+  const doExport = async () => {
+    setBusy("export");
+    setMessage(null);
+    setError(null);
+    try {
+      const path = await exportConfig();
+      setMessage(
+        `Saved your settings to ${path}. Copy that file into the same folder on your other machine, then click "Import settings" there.`
+      );
+    } catch (e) {
+      setError(formatErr(e));
+    } finally {
+      setBusy("idle");
+    }
+  };
+
+  const doImport = async () => {
+    setBusy("import");
+    setMessage(null);
+    setError(null);
+    try {
+      await importConfig();
+      setMessage(
+        "Imported settings from the config file. Your install targets, muted bundles, and preferences now match the other machine."
+      );
+    } catch (e) {
+      setError(formatErr(e));
+    } finally {
+      setBusy("idle");
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] leading-relaxed text-body">
+        Copy your install targets, muted bundles, folder label, and update
+        preferences to your other computers. Export here, move the file over,
+        and import there.
+      </div>
+
+      {/* Parity indicator */}
+      <div
+        className={`flex items-start gap-2 rounded-lg border px-3.5 py-2.5 text-[12px] ${
+          !synced
+            ? "border-border bg-surface text-body"
+            : inSync
+              ? "border-success-border bg-success-bg text-ink"
+              : "border-warning-border bg-warning-bg text-warning-text"
+        }`}
+      >
+        {!synced ? (
+          <IconDeviceLaptop size={15} stroke={2} className="mt-0.5 shrink-0 text-muted" />
+        ) : inSync ? (
+          <IconCheck size={15} stroke={2.25} className="mt-0.5 shrink-0 text-success-fg" />
+        ) : (
+          <IconAlertTriangle size={15} stroke={2} className="mt-0.5 shrink-0" />
+        )}
+        <span>
+          {!synced
+            ? "Not synced yet. Export your settings to set up matching on another machine."
+            : inSync
+              ? `In sync as of ${formatSyncDate(persisted.configSyncedAt!)}.`
+              : `Settings changed since your last sync (${formatSyncDate(
+                  persisted.configSyncedAt!
+                )}). Re-export to update your other machines.`}
+        </span>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => void doExport()}
+          disabled={busy !== "idle"}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
+        >
+          {busy === "export" ? (
+            <IconRefresh size={15} stroke={2} className="animate-spin" />
+          ) : (
+            <IconUpload size={15} stroke={2} />
+          )}
+          Export settings
+        </button>
+        <button
+          type="button"
+          onClick={() => void doImport()}
+          disabled={busy !== "idle"}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
+        >
+          {busy === "import" ? (
+            <IconRefresh size={15} stroke={2} className="animate-spin" />
+          ) : (
+            <IconDownload size={15} stroke={2} />
+          )}
+          Import settings
+        </button>
+      </div>
+
+      {message && (
+        <div className="rounded-lg border border-mcm-blue/30 bg-mcm-blue-tint px-3.5 py-2 text-[11.5px] leading-relaxed text-body">
+          {message}
+        </div>
+      )}
+      {error && (
+        <div className="rounded-lg border border-error-border bg-error-row-bg px-3.5 py-2 text-[11.5px] leading-relaxed text-error-fg">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatErr(e: unknown): string {
+  if (typeof e === "object" && e && "message" in e) {
+    return String((e as { message?: unknown }).message ?? e);
+  }
+  return String(e);
+}
+
+function WipeMachineSection() {
+  const persisted = useAppStore((s) => s.persisted);
+  const wipeMachine = useAppStore((s) => s.wipeMachine);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const fileCount = Object.values(persisted.installedBundles).reduce(
+    (n, b) => n + b.files.length,
+    0
+  );
+
+  const doWipe = async () => {
+    const ok = window.confirm(
+      `Remove everything MCM Vault put on this computer?\n\n` +
+        `This deletes ${fileCount} installed preset file${
+          fileCount === 1 ? "" : "s"
+        } and clears the app's saved data on this machine. Files you created ` +
+        `yourself are not touched. This can't be undone from here.`
+    );
+    if (!ok) return;
+    setBusy(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const removed = await wipeMachine();
+      setMessage(
+        `Removed ${removed} installed file${
+          removed === 1 ? "" : "s"
+        } and cleared this machine's data. You can close the app now.`
+      );
+    } catch (e) {
+      setError(formatErr(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] leading-relaxed text-body">
+        On a borrowed or client machine? Remove every preset MCM Vault installed
+        plus its saved data, all at once. Your own files stay put.
+      </div>
+      <button
+        type="button"
+        onClick={() => void doWipe()}
+        disabled={busy}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-error-border bg-white px-3.5 py-2.5 text-[13px] text-error-fg hover:bg-error-row-bg disabled:opacity-50"
+      >
+        {busy ? (
+          <IconRefresh size={15} stroke={2} className="animate-spin" />
+        ) : (
+          <IconTrash size={15} stroke={2} />
+        )}
+        {busy
+          ? "Removing…"
+          : `Remove everything from this machine${
+              fileCount > 0 ? ` (${fileCount} files)` : ""
+            }`}
+      </button>
+      {message && (
+        <div className="rounded-lg border border-success-border bg-success-bg px-3.5 py-2 text-[11.5px] leading-relaxed text-ink">
+          {message}
+        </div>
+      )}
+      {error && (
+        <div className="rounded-lg border border-error-border bg-error-row-bg px-3.5 py-2 text-[11.5px] leading-relaxed text-error-fg">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const OVERRIDABLE_PRESETS: { key: string; label: string }[] = [
+  { key: "resolve:lut", label: "Resolve LUTs" },
+  { key: "resolve:fusion", label: "Fusion Templates" },
+  { key: "resolve:fairlight", label: "Fairlight Presets" },
+  { key: "premiere:lut", label: "Premiere Technical LUTs" },
+  { key: "premiere:lumetri", label: "Creative Looks (Lumetri)" },
+  { key: "premiere:mogrt", label: "Motion Graphics Templates" },
+  { key: "premiere:caption", label: "Caption / Text Styles" },
+];
+
+function CustomPathsSection({ folderLabel }: { folderLabel: string }) {
+  const pathOverrides = useAppStore((s) => s.persisted.pathOverrides);
+  const setPathOverride = useAppStore((s) => s.setPathOverride);
+  const resetPathOverride = useAppStore((s) => s.resetPathOverride);
+  const isTauriEnv =
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+  const [defaults, setDefaults] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<Record<string, string>>({});
+  const [activeEdit, setActiveEdit] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isTauriEnv) return;
+    const load = async () => {
+      const results: Record<string, string> = {};
+      for (const { key } of OVERRIDABLE_PRESETS) {
+        const [category, presetType] = key.split(":");
+        try {
+          const r = await resolveTarget(category, presetType, folderLabel);
+          results[key] = r.path;
+        } catch {
+          results[key] = "— (not resolved)";
+        }
+      }
+      setDefaults(results);
+    };
+    void load();
+  }, [folderLabel, isTauriEnv]);
+
+  const startEdit = (key: string) => {
+    setEditing((e) => ({ ...e, [key]: pathOverrides[key] ?? defaults[key] ?? "" }));
+    setActiveEdit(key);
+  };
+
+  const cancelEdit = (key: string) => {
+    setEditing((e) => { const n = { ...e }; delete n[key]; return n; });
+    setActiveEdit(null);
+  };
+
+  const saveEdit = async (key: string) => {
+    const val = (editing[key] ?? "").trim();
+    if (val) await setPathOverride(key, val);
+    cancelEdit(key);
+  };
+
+  const reset = async (key: string) => {
+    await resetPathOverride(key);
+  };
+
+  if (!isTauriEnv) {
+    return (
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] text-body">
+        Custom paths are only available in the desktop app.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[12px] leading-relaxed text-body">
+        Override where each preset type is installed on this machine. Leave empty to use the automatically resolved default.
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border">
+        {OVERRIDABLE_PRESETS.map(({ key, label }, idx) => {
+          const override = pathOverrides[key];
+          const defaultPath = defaults[key] ?? "Resolving…";
+          const isEditing = activeEdit === key;
+          const effectivePath = override ?? defaultPath;
+
+          return (
+            <div
+              key={key}
+              className={`px-3.5 py-2.5 ${
+                idx < OVERRIDABLE_PRESETS.length - 1
+                  ? "border-b border-border-soft"
+                  : ""
+              } ${override ? "bg-mcm-blue-tint" : "bg-surface"}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12px] font-medium text-ink">{label}</span>
+                <div className="flex items-center gap-2">
+                  {override && !isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => void reset(key)}
+                      className="text-[11px] text-muted hover:text-error-fg hover:underline"
+                    >
+                      Reset to default
+                    </button>
+                  )}
+                  {!isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(key)}
+                      aria-label={`Edit path for ${label}`}
+                      className="rounded p-0.5 text-muted hover:bg-border-soft hover:text-ink"
+                    >
+                      <IconPencil size={13} stroke={2} />
+                    </button>
+                  )}
+                  {isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => cancelEdit(key)}
+                      aria-label="Cancel"
+                      className="rounded p-0.5 text-muted hover:bg-border-soft hover:text-ink"
+                    >
+                      <IconX size={13} stroke={2} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {!isEditing && (
+                <div className="mt-0.5 break-all font-mono text-[10.5px] text-body">
+                  {override ? (
+                    <span className="text-mcm-blue">{effectivePath}</span>
+                  ) : (
+                    <span className="text-muted">{effectivePath}</span>
+                  )}
+                </div>
+              )}
+
+              {isEditing && (
+                <div className="mt-1.5 flex gap-1.5">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={editing[key] ?? ""}
+                    onChange={(e) =>
+                      setEditing((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void saveEdit(key);
+                      if (e.key === "Escape") cancelEdit(key);
+                    }}
+                    placeholder={defaultPath}
+                    className="min-w-0 flex-1 rounded-md border border-mcm-blue bg-white px-2 py-1 font-mono text-[11px] text-ink focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveEdit(key)}
+                    className="shrink-0 rounded-md bg-mcm-blue px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90"
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>

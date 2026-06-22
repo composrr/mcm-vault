@@ -208,17 +208,25 @@ async fn snapshot_previous(
 pub async fn install_bundle(
     window: Window,
     bundle: Bundle,
+    path_override: Option<String>,
 ) -> Result<InstallResult, InstallError> {
     let (folder_label, install_targets) = current_settings().await;
 
-    // Resolve all target install dirs (one per host-app version per
-    // install_targets setting; one for version-agnostic preset types).
-    let targets = path_resolver::resolve_install_paths(
-        &bundle.category,
-        &bundle.preset_type,
-        &folder_label,
-        &install_targets,
-    )?;
+    // Resolve all target install dirs. A user-supplied path_override bypasses
+    // auto-detection entirely and installs to exactly that one directory.
+    let targets = if let Some(ref custom) = path_override {
+        vec![path_resolver::ResolvedTarget {
+            path: custom.clone(),
+            install_type: "auto".into(),
+        }]
+    } else {
+        path_resolver::resolve_install_paths(
+            &bundle.category,
+            &bundle.preset_type,
+            &folder_label,
+            &install_targets,
+        )?
+    };
 
     // Snapshot the previous install (if any) before overwriting.
     let app_state = state::read_state().await.ok();
@@ -436,6 +444,37 @@ pub async fn uninstall_bundle(files: Vec<String>) -> Result<usize, InstallError>
                 })?;
             removed += 1;
         }
+    }
+    Ok(removed)
+}
+
+/// Remove every file MCM Vault installed on this machine (all tracked bundle
+/// files across all install targets) and wipe the app's data directory
+/// (state.json, logs, snapshots, staging, the publisher's repo clone). For a
+/// roaming freelancer leaving a borrowed/client machine — one action, no
+/// trace left behind. Returns the number of installed files deleted. Does NOT
+/// touch files the user created themselves (only tracked installs).
+#[tauri::command]
+pub async fn wipe_this_machine() -> Result<usize, InstallError> {
+    let mut removed = 0usize;
+    if let Ok(s) = state::read_state().await {
+        for bundle in s.installed_bundles.values() {
+            for f in &bundle.files {
+                let p = PathBuf::from(f);
+                if p.exists() && tokio::fs::remove_file(&p).await.is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    state::log_event(
+        "INFO",
+        format!("wipe_this_machine removed {removed} installed file(s) + app data"),
+    );
+    // Remove the entire app data dir last (this also deletes the log we just
+    // wrote, plus snapshots, staging, and any publisher repo clone).
+    if let Ok(dir) = state::app_data_dir() {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
     Ok(removed)
 }

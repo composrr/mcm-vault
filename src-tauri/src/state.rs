@@ -78,6 +78,28 @@ pub struct PublisherFile {
     pub mtime_ms: i64,
 }
 
+/// Records the most recent successful publish so the maintainer can one-click
+/// "Revert last publish" (git revert that commit + push).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastPublish {
+    pub sha: String,
+    pub summary: String,
+    pub published_at: String,
+}
+
+/// Tracks what the user has confirmed importing for a manual-import bundle
+/// (e.g. Resolve PowerGrades). Lets the import modal show only files that are
+/// new since the last import, and lets the receive row show "Imported" vs
+/// "Needs import" instead of a misleading green check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedState {
+    pub version: String,
+    pub files: Vec<String>,
+    pub imported_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PublisherBundleState {
@@ -114,11 +136,29 @@ pub struct AppState {
     pub publisher: BTreeMap<String, PublisherBundleState>,
     #[serde(default)]
     pub publisher_repo_path: Option<String>,
+    /// Most recent successful publish (for "Revert last publish").
+    #[serde(default)]
+    pub last_publish: Option<LastPublish>,
+    /// Per-bundle manual-import acknowledgment (keyed by bundle id).
+    #[serde(default)]
+    pub imported: BTreeMap<String, ImportedState>,
+    /// When this machine last exported or imported a shared config, and a
+    /// fingerprint of the synced fields at that time. Used to flag drift
+    /// ("settings changed since last sync") in the cross-machine UI.
+    #[serde(default)]
+    pub config_synced_at: Option<String>,
+    #[serde(default)]
+    pub config_fingerprint: Option<String>,
     /// Bundle IDs the user has opted out of on this machine. Disabled bundles
     /// don't auto-install, don't count toward "Update all," and show muted in
     /// the receive view.
     #[serde(default)]
     pub disabled_bundles: Vec<String>,
+    /// User-defined install path overrides, keyed by "category:presetType"
+    /// (e.g. "resolve:lut", "premiere:mogrt"). When present, the override
+    /// replaces the auto-resolved path for that preset type on this machine.
+    #[serde(default)]
+    pub path_overrides: BTreeMap<String, String>,
 }
 
 impl Default for AppState {
@@ -133,7 +173,12 @@ impl Default for AppState {
             last_known_manifest: None,
             publisher: BTreeMap::new(),
             publisher_repo_path: None,
+            last_publish: None,
+            imported: BTreeMap::new(),
+            config_synced_at: None,
+            config_fingerprint: None,
             disabled_bundles: Vec::new(),
+            path_overrides: BTreeMap::new(),
         }
     }
 }
@@ -274,4 +319,61 @@ pub async fn open_state_folder() -> Result<String, StateError> {
             message: e.to_string(),
         })?;
     Ok(dir.to_string_lossy().to_string())
+}
+
+/// Shared-config file lives in the user-visible presets folder so it's easy to
+/// copy to another machine (Dropbox, USB, etc.). One file per folder label.
+fn machine_config_path(folder_label: &str) -> Result<PathBuf, StateError> {
+    let docs = dirs::document_dir().ok_or_else(|| StateError::Path {
+        message: "no Documents directory".into(),
+    })?;
+    Ok(docs
+        .join(format!("{folder_label} Presets"))
+        .join("mcm-vault-config.json"))
+}
+
+/// Write the caller-built config JSON to the shared-config file and reveal its
+/// folder. Returns the absolute path written.
+#[tauri::command]
+pub async fn export_machine_config(
+    contents: String,
+    folder_label: String,
+) -> Result<String, StateError> {
+    let path = machine_config_path(&folder_label)?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| StateError::Io {
+                message: e.to_string(),
+            })?;
+    }
+    tokio::fs::write(&path, contents)
+        .await
+        .map_err(|e| StateError::Io {
+            message: e.to_string(),
+        })?;
+    if let Some(parent) = path.parent() {
+        let _ = open::that(parent);
+    }
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Read the shared-config file's raw JSON (the caller parses + applies it).
+#[tauri::command]
+pub async fn import_machine_config(folder_label: String) -> Result<String, StateError> {
+    let path = machine_config_path(&folder_label)?;
+    if !path.exists() {
+        return Err(StateError::Io {
+            message: format!(
+                "No config file found at {}. Export it from your other machine first, then copy it here.",
+                path.display()
+            ),
+        });
+    }
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| StateError::Io {
+            message: e.to_string(),
+        })?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
 }

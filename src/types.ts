@@ -89,6 +89,18 @@ export interface PublisherBundleState {
   includedFiles: string[];
 }
 
+export interface LastPublish {
+  sha: string;
+  summary: string;
+  publishedAt: string;
+}
+
+export interface ImportedState {
+  version: string;
+  files: string[];
+  importedAt: string;
+}
+
 export interface AppState {
   schemaVersion: number;
   lastChecked: string | null;
@@ -99,7 +111,25 @@ export interface AppState {
   lastKnownManifest: Manifest | null;
   publisher: Record<string, PublisherBundleState>;
   publisherRepoPath: string | null;
+  lastPublish: LastPublish | null;
+  imported: Record<string, ImportedState>;
+  configSyncedAt: string | null;
+  configFingerprint: string | null;
   disabledBundles: string[];
+  /** User-defined install path overrides, keyed by "category:presetType".
+   *  When set, replaces the auto-resolved path for that preset type on this machine. */
+  pathOverrides: Record<string, string>;
+}
+
+/** The subset of state shared between a user's machines via the config file. */
+export interface MachineConfig {
+  version: 1;
+  folderLabel: string;
+  installTargets: InstallTargets;
+  disabledBundles: string[];
+  checkInterval: AppSettings["checkInterval"];
+  showNotifications: boolean;
+  autoUpdateOnLaunch: boolean;
 }
 
 export interface BundleRowData {
@@ -108,4 +138,7 @@ export interface BundleRowData {
   installedVersion?: string;
   errorMessage?: string;
   disabled?: boolean;
+  /** Manual-import bundles only: whether the synced files have been imported
+   *  into the host app at the current version. */
+  importStatus?: "imported" | "needsimport";
 }

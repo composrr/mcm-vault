@@ -193,5 +193,10 @@ export const samplePersisted: PersistedState = {
   lastKnownManifest: null,
   publisher: {},
   publisherRepoPath: null,
+  lastPublish: null,
+  imported: {},
+  configSyncedAt: null,
+  configFingerprint: null,
   disabledBundles: [],
+  pathOverrides: {},
 };

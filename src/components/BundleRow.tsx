@@ -51,6 +51,14 @@ function metaLine(row: BundleRowData): { text: string; tone: "muted" | "highligh
   if (status === "notinstalled") {
     return { text: `${base} · Not installed`, tone: "muted" };
   }
+  // Manual-import bundle whose files are synced but not yet imported into the
+  // host app — nudge the user without an alarming "update" color.
+  if (row.importStatus === "needsimport") {
+    return { text: `${base} · Needs import`, tone: "highlight" };
+  }
+  if (row.importStatus === "imported") {
+    return { text: `${base} · Imported`, tone: "muted" };
+  }
   return { text: base, tone: "muted" };
 }
 
