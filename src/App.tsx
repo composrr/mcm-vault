@@ -7,10 +7,7 @@ import { StatusBar } from "./components/StatusBar";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { BundleDetailView } from "./components/BundleDetailView";
 import { ManualImportModal } from "./components/ManualImportModal";
-import {
-  FirstRunWelcome,
-  type FirstRunState,
-} from "./components/FirstRunWelcome";
+import { FirstRunWelcome } from "./components/FirstRunWelcome";
 import { NoHostAppsState } from "./components/NoHostAppsState";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { PublisherView } from "./components/PublisherView";
@@ -51,7 +48,6 @@ function App() {
   const [manualModalBundleId, setManualModalBundleId] = useState<string | null>(
     null
   );
-  const [firstRunState, setFirstRunState] = useState<FirstRunState>("welcome");
   const [installSessionIds, setInstallSessionIds] = useState<string[]>([]);
   const [progressModalOpen, setProgressModalOpen] = useState(false);
   const sessionActiveRef = useRef(false);
@@ -172,23 +168,6 @@ function App() {
     () => Object.values(runtime).some((r) => r.installing),
     [runtime]
   );
-  const installedCount = useMemo(
-    () => Object.keys(persisted.installedBundles).length,
-    [persisted.installedBundles]
-  );
-  const totalManifestBundles = manifest?.bundles.length ?? 0;
-  const manualBundleCount = useMemo(
-    () => manifest?.bundles.filter((b) => b.installType === "manual").length ?? 0,
-    [manifest]
-  );
-  const currentBundleName = useMemo(() => {
-    const inProgress = Object.entries(runtime).find(
-      ([, r]) => r.installing && r.progress
-    );
-    if (!inProgress) return undefined;
-    const [bundleId] = inProgress;
-    return manifest?.bundles.find((b) => b.id === bundleId)?.name;
-  }, [runtime, manifest]);
 
   const detected = diagnostics
     ? [diagnostics.premiere, diagnostics.audition, diagnostics.resolve]
@@ -222,19 +201,6 @@ function App() {
     [manifest, manualModalBundleId]
   );
 
-  const handleFirstRunInstall = useCallback(async () => {
-    setFirstRunState("installing");
-    if (manifest) {
-      for (const bundle of manifest.bundles) {
-        await installOne(bundle);
-      }
-    }
-    setFirstRunState("complete");
-  }, [manifest, installOne]);
-
-  const handleFirstRunOpen = useCallback(() => {
-    markFirstRunComplete();
-  }, [markFirstRunComplete]);
 
   if (!ready) {
     return (
@@ -258,15 +224,8 @@ function App() {
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
         <AppHeader />
         <FirstRunWelcome
-          state={firstRunState}
           detected={detected}
-          totalBundles={totalManifestBundles}
-          installedCount={installedCount}
-          currentBundleName={currentBundleName}
-          hasManualBundles={manualBundleCount > 0}
-          manualBundleCount={manualBundleCount}
-          onInstall={() => void handleFirstRunInstall()}
-          onOpen={handleFirstRunOpen}
+          onOpen={() => markFirstRunComplete()}
         />
       </div>
     );
