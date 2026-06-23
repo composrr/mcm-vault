@@ -265,10 +265,33 @@ export async function revertLastPublish(sha: string): Promise<string> {
   return invoke<string>("revert_last_publish", { sha });
 }
 
+export async function pauseInstall(): Promise<void> {
+  await invoke("pause_install");
+}
+
+export async function resumeInstall(): Promise<void> {
+  await invoke("resume_install");
+}
+
+export async function cancelInstall(): Promise<void> {
+  await invoke("cancel_install");
+}
+
 export async function listenInstallProgress(
   handler: (p: InstallProgress) => void
 ): Promise<UnlistenFn> {
   return listen<InstallProgress>("install-progress", (e) => handler(e.payload));
+}
+
+export interface PublishProgressEvent {
+  bundleId: string | null;
+  phase: string;
+}
+
+export async function listenPublishProgress(
+  handler: (p: PublishProgressEvent) => void
+): Promise<UnlistenFn> {
+  return listen<PublishProgressEvent>("publish-progress", (e) => handler(e.payload));
 }
 
 export async function notifyUser(title: string, body: string): Promise<void> {

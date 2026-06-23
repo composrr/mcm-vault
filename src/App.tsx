@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "./components/AppHeader";
 import { CategoryStrip, type CategoryFilter } from "./components/CategoryStrip";
 import { BundleList } from "./components/BundleList";
@@ -14,6 +14,7 @@ import {
 import { NoHostAppsState } from "./components/NoHostAppsState";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { PublisherView } from "./components/PublisherView";
+import { InstallProgressModal } from "./components/InstallProgressModal";
 import { useAppStore } from "./store/useAppStore";
 import { deriveRows } from "./lib/derive";
 import {
@@ -51,6 +52,9 @@ function App() {
     null
   );
   const [firstRunState, setFirstRunState] = useState<FirstRunState>("welcome");
+  const [installSessionIds, setInstallSessionIds] = useState<string[]>([]);
+  const [progressModalOpen, setProgressModalOpen] = useState(false);
+  const sessionActiveRef = useRef(false);
 
   const ready = useAppStore((s) => s.ready);
   const fetchStatus = useAppStore((s) => s.fetchStatus);
@@ -64,6 +68,7 @@ function App() {
   const refresh = useAppStore((s) => s.refreshManifest);
   const installAll = useAppStore((s) => s.installAllUpdates);
   const installOne = useAppStore((s) => s.installOne);
+  const cancelInstallSession = useAppStore((s) => s.cancelInstallSession);
   const removeBundle = useAppStore((s) => s.removeBundle);
   const restoreBundle = useAppStore((s) => s.restoreBundle);
   const markBundleImported = useAppStore((s) => s.markBundleImported);
@@ -118,6 +123,29 @@ function App() {
     }, ms);
     return () => clearInterval(id);
   }, [isFirstRun, persisted.settings.checkInterval, refresh]);
+
+  useEffect(() => {
+    const installingIds = Object.entries(runtime)
+      .filter(([, r]) => r.installing)
+      .map(([id]) => id);
+    if (installingIds.length === 0) return;
+    if (!sessionActiveRef.current) {
+      sessionActiveRef.current = true;
+      setProgressModalOpen(true);
+      setInstallSessionIds(installingIds);
+    } else {
+      setInstallSessionIds((prev) => {
+        const fresh = installingIds.filter((id) => !prev.includes(id));
+        return fresh.length > 0 ? [...prev, ...fresh] : prev;
+      });
+    }
+  }, [runtime]);
+
+  const handleDismissProgress = useCallback(() => {
+    setProgressModalOpen(false);
+    sessionActiveRef.current = false;
+    setInstallSessionIds([]);
+  }, []);
 
   const allRows = useMemo(
     () => deriveRows(manifest, persisted, runtime),
@@ -269,7 +297,7 @@ function App() {
   const publisherMode = persisted.settings.publisherMode;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-white">
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-white">
       <AppHeader onOpenSettings={() => setView("settings")} />
       {publisherMode && view !== "detail" && (
         <div className="flex border-b border-border bg-surface px-5 py-1.5">
@@ -407,6 +435,16 @@ function App() {
             appVersion={appVersion}
           />
         </>
+      )}
+
+      {progressModalOpen && (
+        <InstallProgressModal
+          sessionIds={installSessionIds}
+          runtime={runtime}
+          manifest={manifest}
+          onDismiss={handleDismissProgress}
+          onCancel={() => void cancelInstallSession()}
+        />
       )}
 
       {manualBundle && (

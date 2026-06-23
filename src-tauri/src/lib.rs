@@ -25,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .manage(install::InstallControl::new())
         .invoke_handler(tauri::generate_handler![
             app_branding,
             manifest::fetch_manifest,
@@ -45,6 +46,9 @@ pub fn run() {
             install::reveal_bundle_folder,
             install::restore_previous_install,
             install::wipe_this_machine,
+            install::pause_install,
+            install::resume_install,
+            install::cancel_install,
             publisher::scan_publish_diffs,
             publisher::publish_bundles,
             publisher::publisher_default_source,

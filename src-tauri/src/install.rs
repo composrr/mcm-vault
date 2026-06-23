@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Window};
@@ -7,6 +9,48 @@ use crate::branding;
 use crate::manifest::Bundle;
 use crate::path_resolver::{self, PathError};
 use crate::state;
+
+// ─── Install control (pause / cancel) ───────────────────────────────────────
+
+pub struct InstallControl {
+    pub cancel: AtomicBool,
+    pub pause_tx: tokio::sync::watch::Sender<bool>,
+    pub pause_rx: tokio::sync::watch::Receiver<bool>,
+}
+
+impl InstallControl {
+    pub fn new() -> Arc<Self> {
+        let (pause_tx, pause_rx) = tokio::sync::watch::channel(false);
+        Arc::new(Self {
+            cancel: AtomicBool::new(false),
+            pause_tx,
+            pause_rx,
+        })
+    }
+
+    fn reset(&self) {
+        self.cancel.store(false, Ordering::SeqCst);
+        let _ = self.pause_tx.send(false);
+    }
+}
+
+#[tauri::command]
+pub fn pause_install(control: tauri::State<'_, Arc<InstallControl>>) {
+    let _ = control.pause_tx.send(true);
+}
+
+#[tauri::command]
+pub fn resume_install(control: tauri::State<'_, Arc<InstallControl>>) {
+    let _ = control.pause_tx.send(false);
+}
+
+#[tauri::command]
+pub fn cancel_install(control: tauri::State<'_, Arc<InstallControl>>) {
+    control.cancel.store(true, Ordering::SeqCst);
+    let _ = control.pause_tx.send(false); // unblock pause so cancel can proceed
+}
+
+// ─── Errors ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -19,6 +63,7 @@ pub enum InstallError {
     Status { code: u16, file: String },
     #[serde(rename_all = "camelCase")]
     Io { message: String },
+    Cancelled,
 }
 
 impl From<PathError> for InstallError {
@@ -36,6 +81,7 @@ impl std::fmt::Display for InstallError {
             InstallError::Network { message } => write!(f, "network error: {message}"),
             InstallError::Status { code, file } => write!(f, "HTTP {code} downloading {file}"),
             InstallError::Io { message } => write!(f, "io error: {message}"),
+            InstallError::Cancelled => write!(f, "cancelled"),
         }
     }
 }
@@ -209,7 +255,10 @@ pub async fn install_bundle(
     window: Window,
     bundle: Bundle,
     path_override: Option<String>,
+    control: tauri::State<'_, Arc<InstallControl>>,
 ) -> Result<InstallResult, InstallError> {
+    control.reset();
+    let mut pause_rx = control.pause_rx.clone();
     let (folder_label, install_targets) = current_settings().await;
 
     // Resolve all target install dirs. A user-supplied path_override bypasses
@@ -273,6 +322,25 @@ pub async fn install_bundle(
     let mut staged: Vec<(PathBuf, String)> = Vec::with_capacity(total);
 
     for (idx, file_name) in bundle.files.iter().enumerate() {
+        // Check cancel before each file
+        if control.cancel.load(Ordering::Relaxed) {
+            let _ = tokio::fs::remove_dir_all(&staging_root).await;
+            return Err(InstallError::Cancelled);
+        }
+
+        // Wait while paused (non-blocking if not paused)
+        loop {
+            let is_paused = *pause_rx.borrow_and_update();
+            if !is_paused { break; }
+            if pause_rx.changed().await.is_err() { break; }
+        }
+
+        // Re-check cancel after resuming from pause
+        if control.cancel.load(Ordering::Relaxed) {
+            let _ = tokio::fs::remove_dir_all(&staging_root).await;
+            return Err(InstallError::Cancelled);
+        }
+
         let _ = window.emit(
             "install-progress",
             InstallProgress {

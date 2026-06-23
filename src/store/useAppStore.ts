@@ -1,5 +1,6 @@
 ﻿import { create } from "zustand";
 import {
+  cancelInstall,
   exportMachineConfig,
   fetchManifest,
   importMachineConfig,
@@ -77,6 +78,7 @@ export interface AppStore {
   refreshManifest: () => Promise<void>;
   installOne: (bundle: Bundle) => Promise<void>;
   installAllUpdates: () => Promise<void>;
+  cancelInstallSession: () => Promise<void>;
   removeBundle: (bundleId: string) => Promise<void>;
   restoreBundle: (bundleId: string) => Promise<void>;
   markBundleImported: (bundleId: string) => Promise<void>;
@@ -93,6 +95,7 @@ export interface AppStore {
 }
 
 let progressUnlisten: (() => void) | null = null;
+let batchAborted = false;
 
 async function persist(get: () => AppStore, patch: Partial<PersistedState>) {
   const next: PersistedState = { ...get().persisted, ...patch };
@@ -248,6 +251,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
+  async cancelInstallSession() {
+    batchAborted = true;
+    await cancelInstall().catch(() => {});
+  },
+
   async installAllUpdates() {
     const { manifest, persisted, installOne } = get();
     if (!manifest) return;
@@ -258,7 +266,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return !inst || inst.version !== b.version;
     });
     if (queue.length === 0) return;
+    batchAborted = false;
     for (const bundle of queue) {
+      if (batchAborted) break;
       await installOne(bundle);
     }
     if (get().persisted.settings.showNotifications) {

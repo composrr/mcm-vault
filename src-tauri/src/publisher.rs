@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter};
 use tokio::process::Command;
 
 #[cfg(windows)]
@@ -315,6 +316,13 @@ fn walk_repo_files_inner(root: &Path, dir: &Path, out: &mut Vec<String>) {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishProgressEvent {
+    pub bundle_id: Option<String>,
+    pub phase: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishResult {
@@ -333,7 +341,7 @@ pub struct PublishedBundle {
 }
 
 #[tauri::command]
-pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, PublisherError> {
+pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> Result<PublishResult, PublisherError> {
     if plans.is_empty() {
         return Err(PublisherError::Manifest {
             message: "nothing to publish".into(),
@@ -370,6 +378,10 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
     let mut published = Vec::new();
 
     for plan in &plans {
+        let _ = app_handle.emit("publish-progress", PublishProgressEvent {
+            bundle_id: Some(plan.bundle_id.clone()),
+            phase: "copying".into(),
+        });
         let bundle_index = bundles_array
             .iter()
             .position(|b| b.get("id").and_then(|i| i.as_str()) == Some(plan.bundle_id.as_str()))
@@ -525,6 +537,10 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
             ),
         );
 
+        let _ = app_handle.emit("publish-progress", PublishProgressEvent {
+            bundle_id: Some(plan.bundle_id.clone()),
+            phase: "done".into(),
+        });
         published.push(PublishedBundle {
             bundle_id: plan.bundle_id.clone(),
             new_version,
@@ -558,6 +574,10 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
         })?;
 
     // git add + commit + push
+    let _ = app_handle.emit("publish-progress", PublishProgressEvent {
+        bundle_id: None,
+        phase: "committing".into(),
+    });
     run_git(&repo, &["add", "-A"]).await?;
     let summary = published
         .iter()
@@ -581,6 +601,10 @@ pub async fn publish_bundles(plans: Vec<PublishPlan>) -> Result<PublishResult, P
         }
     }
     run_git(&repo, &["push", "origin", branding::REPO_BRANCH]).await?;
+    let _ = app_handle.emit("publish-progress", PublishProgressEvent {
+        bundle_id: None,
+        phase: "complete".into(),
+    });
     let sha = run_git(&repo, &["rev-parse", "HEAD"]).await.ok().map(|s| s.trim().to_string());
 
     Ok(PublishResult {

@@ -1,9 +1,12 @@
+import { useState } from "react";
 import {
   IconAlertTriangle,
   IconArrowBackUp,
   IconArrowLeft,
   IconArrowUp,
   IconCheck,
+  IconChevronDown,
+  IconChevronUp,
   IconCircle,
   IconExternalLink,
   IconFile,
@@ -118,6 +121,8 @@ function formatDate(iso: string | undefined): string {
   }
 }
 
+const FILES_PREVIEW = 10;
+
 export function BundleDetailView({
   bundle,
   status,
@@ -130,6 +135,8 @@ export function BundleDetailView({
   onReveal,
   onRestore,
 }: BundleDetailViewProps) {
+  const [filesExpanded, setFilesExpanded] = useState(false);
+
   const previous = installed?.previousInstall;
   const canRestore = !!onRestore && !!previous;
   const categoryLabel =
@@ -139,9 +146,15 @@ export function BundleDetailView({
   const installPath =
     installedFiles[0] ? installedFiles[0].replace(/[\\/][^\\/]+$/, "") : null;
 
+  const allFiles = bundle.files;
+  const hasMore = allFiles.length > FILES_PREVIEW;
+  const visibleFiles = filesExpanded ? allFiles : allFiles.slice(0, FILES_PREVIEW);
+  const hiddenCount = allFiles.length - FILES_PREVIEW;
+
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto bg-white">
-      <div className="flex items-center gap-2.5 border-b border-border bg-surface px-5 py-3">
+    <div className="flex flex-1 flex-col overflow-hidden bg-white">
+      {/* Sticky header */}
+      <div className="flex-none flex items-center gap-2.5 border-b border-border bg-surface px-5 py-3">
         <button
           type="button"
           onClick={onBack}
@@ -154,98 +167,121 @@ export function BundleDetailView({
         <div className="w-12" />
       </div>
 
-      <div className="px-5 pb-4 pt-6">
-        <div className="mb-4 flex items-start gap-3.5">
-          <StatusIconLarge status={status} installing={installing} />
-          <div className="flex-1">
-            <div className="text-[17px] font-semibold text-ink">{bundle.name}</div>
-            <div className="mt-0.5 text-[12px] text-body">
-              {categoryLabel} · {presetLabel} · {statusLabel(status, installing)}
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="px-5 pb-4 pt-6">
+          <div className="mb-4 flex items-start gap-3.5">
+            <StatusIconLarge status={status} installing={installing} />
+            <div className="flex-1">
+              <div className="text-[17px] font-semibold text-ink">{bundle.name}</div>
+              <div className="mt-0.5 text-[12px] text-body">
+                {categoryLabel} · {presetLabel} · {statusLabel(status, installing)}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] tracking-wide text-muted">VERSION</div>
+              <div className="text-[16px] font-medium tabular-nums text-ink">
+                {bundle.version}
+              </div>
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-[11px] tracking-wide text-muted">VERSION</div>
-            <div className="text-[16px] font-medium tabular-nums text-ink">
-              {bundle.version}
+
+          {bundle.description && (
+            <div className="rounded-lg border border-border bg-surface px-3.5 py-3 text-[13px] leading-relaxed text-body">
+              {bundle.description}
             </div>
-          </div>
+          )}
         </div>
 
-        {bundle.description && (
-          <div className="rounded-lg border border-border bg-surface px-3.5 py-3 text-[13px] leading-relaxed text-body">
-            {bundle.description}
+        {errorMessage && (
+          <div className="mx-5 mb-3 rounded-lg border border-error-border bg-error-row-bg px-3.5 py-2.5 text-[12px] text-error-fg">
+            {errorMessage}
           </div>
         )}
-      </div>
 
-      {errorMessage && (
-        <div className="mx-5 mb-3 rounded-lg border border-error-border bg-error-row-bg px-3.5 py-2.5 text-[12px] text-error-fg">
-          {errorMessage}
-        </div>
-      )}
-
-      <section className="px-5 pb-3">
-        <div className="mb-2 text-[11px] tracking-wide text-muted">
-          FILES ({bundle.files.length})
-        </div>
-        <div className="overflow-hidden rounded-lg border border-border bg-surface">
-          {bundle.files.map((file) => (
-            <div
-              key={file}
-              className="flex items-center gap-2.5 border-b border-border px-3.5 py-2.5 last:border-b-0"
-            >
-              <IconFile size={16} stroke={2} className="text-muted" />
-              <span className="flex-1 text-[13px] text-ink">{file}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {installPath && (
         <section className="px-5 pb-3">
-          <div className="mb-2 text-[11px] tracking-wide text-muted">INSTALLED AT</div>
-          <div className="flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
-            <IconFolder size={16} stroke={2} className="shrink-0 text-muted" />
-            <span className="flex-1 break-all font-mono text-[12px] text-body">
-              {installPath}
-            </span>
-            <button
-              type="button"
-              aria-label="Open in Explorer"
-              onClick={onReveal}
-              className="shrink-0 rounded-md p-1 text-mcm-blue hover:bg-border-soft"
-            >
-              <IconExternalLink size={16} stroke={2} />
-            </button>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">
+            FILES ({allFiles.length})
           </div>
-        </section>
-      )}
-
-      {installed && (
-        <section className="px-5 pb-4">
-          <div className="mb-2 text-[11px] tracking-wide text-muted">DETAILS</div>
-          <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
-            <div className="flex justify-between py-1 text-[13px]">
-              <span className="text-muted">Installed</span>
-              <span className="text-ink">{formatDate(installed.installedAt)}</span>
-            </div>
-            <div className="flex justify-between py-1 text-[13px]">
-              <span className="text-muted">File count</span>
-              <span className="text-ink">{installed.files.length}</span>
-            </div>
-            {previous && (
-              <div className="flex justify-between py-1 text-[13px]">
-                <span className="text-muted">Previous version</span>
-                <span className="text-ink tabular-nums">
-                  v{previous.version} · {formatDate(previous.archivedAt)}
-                </span>
+          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+            {visibleFiles.map((file) => (
+              <div
+                key={file}
+                className="flex items-center gap-2.5 border-b border-border px-3.5 py-2 last:border-b-0"
+              >
+                <IconFile size={14} stroke={2} className="shrink-0 text-muted" />
+                <span className="flex-1 truncate text-[12px] text-ink">{file}</span>
               </div>
+            ))}
+            {hasMore && (
+              <button
+                type="button"
+                onClick={() => setFilesExpanded((v) => !v)}
+                className="flex w-full items-center justify-center gap-1.5 border-t border-border px-3.5 py-2 text-[12px] text-mcm-blue hover:bg-border-soft"
+              >
+                {filesExpanded ? (
+                  <>
+                    <IconChevronUp size={13} stroke={2} />
+                    Show fewer files
+                  </>
+                ) : (
+                  <>
+                    <IconChevronDown size={13} stroke={2} />
+                    Show {hiddenCount} more file{hiddenCount === 1 ? "" : "s"}
+                  </>
+                )}
+              </button>
             )}
           </div>
         </section>
-      )}
 
-      <div className="mt-auto border-t border-border bg-surface px-5 py-3.5">
+        {installPath && (
+          <section className="px-5 pb-3">
+            <div className="mb-2 text-[11px] tracking-wide text-muted">INSTALLED AT</div>
+            <div className="flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
+              <IconFolder size={16} stroke={2} className="shrink-0 text-muted" />
+              <span className="flex-1 break-all font-mono text-[12px] text-body">
+                {installPath}
+              </span>
+              <button
+                type="button"
+                aria-label="Open in Explorer"
+                onClick={onReveal}
+                className="shrink-0 rounded-md p-1 text-mcm-blue hover:bg-border-soft"
+              >
+                <IconExternalLink size={16} stroke={2} />
+              </button>
+            </div>
+          </section>
+        )}
+
+        {installed && (
+          <section className="px-5 pb-4">
+            <div className="mb-2 text-[11px] tracking-wide text-muted">DETAILS</div>
+            <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
+              <div className="flex justify-between py-1 text-[13px]">
+                <span className="text-muted">Installed</span>
+                <span className="text-ink">{formatDate(installed.installedAt)}</span>
+              </div>
+              <div className="flex justify-between py-1 text-[13px]">
+                <span className="text-muted">File count</span>
+                <span className="text-ink">{installed.files.length}</span>
+              </div>
+              {previous && (
+                <div className="flex justify-between py-1 text-[13px]">
+                  <span className="text-muted">Previous version</span>
+                  <span className="text-ink tabular-nums">
+                    v{previous.version} · {formatDate(previous.archivedAt)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+      </div>
+
+      {/* Sticky footer */}
+      <div className="flex-none border-t border-border bg-surface px-5 py-3.5">
         <div className="flex gap-2">
           <button
             type="button"
