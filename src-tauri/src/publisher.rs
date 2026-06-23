@@ -488,19 +488,19 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
                 message: e.to_string(),
             })?;
 
-        let want_in_repo: std::collections::HashSet<&String> =
-            new_bundle_files.iter().collect();
+        let want_in_repo: Vec<String> = new_bundle_files.clone();
 
         // Sync repo's bundle folder against new_bundle_files. Walk recursively
         // so subdirs (e.g. keyboard's `win/`/`mac/`) are covered. Only delete
         // files this machine "owns" — i.e. the ones the local platform could
         // have produced — so a Windows publisher doesn't wipe Mac files and
-        // vice versa.
+        // vice versa. Use case-insensitive comparison so macOS case folding
+        // doesn't cause files to be incorrectly deleted before re-copy.
         for rel in walk_repo_files(&target_dir) {
             if rel.eq_ignore_ascii_case("_PLACEHOLDER.md") {
                 continue;
             }
-            if want_in_repo.contains(&rel) {
+            if want_in_repo.iter().any(|w| w.eq_ignore_ascii_case(&rel)) {
                 continue;
             }
             if !is_local_platform_file(preset_type, &rel) {
@@ -541,6 +541,27 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
                 },
             );
         }
+
+        // Remap new_bundle_files to the actual on-disk casing after all copies.
+        // On case-insensitive filesystems (macOS, Windows), create_dir_all may
+        // reuse a differently-cased existing directory. The manifest must reflect
+        // what git actually tracks, not what we intended, so raw content URLs match.
+        let actual_paths = walk_repo_files(&target_dir);
+        let actual_path_map: std::collections::HashMap<String, String> = actual_paths
+            .iter()
+            .filter(|p| !p.eq_ignore_ascii_case("_PLACEHOLDER.md"))
+            .map(|p| (p.to_lowercase(), p.clone()))
+            .collect();
+        new_bundle_files = new_bundle_files
+            .into_iter()
+            .map(|name| {
+                actual_path_map
+                    .get(&name.to_lowercase())
+                    .cloned()
+                    .unwrap_or(name)
+            })
+            .collect();
+        new_bundle_files.sort();
 
         // Update manifest entry: version, files.
         let bundle_obj = bundle_value
