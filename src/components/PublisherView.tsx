@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
   IconArrowBackUp,
   IconCloudUpload,
   IconExternalLink,
   IconFolderOpen,
+  IconFolder,
   IconLoader2,
   IconRefresh,
+  IconX,
 } from "@tabler/icons-react";
 import type { Bundle, PublisherBundleState } from "../types";
 import {
   publishBundles,
   publisherDefaultSource,
+  resolveTarget,
   revealPath,
   revertLastPublish,
   scanPublishDiffs,
@@ -174,6 +177,30 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     const cur = new Set(existing?.includedFiles ?? []);
     if (cur.has(fileName)) cur.delete(fileName);
     else cur.add(fileName);
+    setPersisted({
+      publisher: {
+        ...persisted.publisher,
+        [bundleId]: {
+          ...(existing ?? {
+            sourcePath: "",
+            lastPublishedFiles: {},
+            lastPublishedAt: null,
+            lastPublishedVersion: null,
+            includedFiles: [],
+          }),
+          includedFiles: Array.from(cur).sort(),
+        },
+      },
+    });
+  };
+
+  const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) => {
+    const existing = persisted.publisher[bundleId];
+    const cur = new Set(existing?.includedFiles ?? []);
+    for (const name of fileNames) {
+      if (checked) cur.add(name);
+      else cur.delete(name);
+    }
     setPersisted({
       publisher: {
         ...persisted.publisher,
@@ -418,11 +445,13 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
         ) : (
           <BundlePanel
             bundle={selectedBundle}
+            folderLabel={folderLabel}
             status={diffs[selectedBundle.id] ?? null}
             entry={publisherEntries[selectedBundle.id] ?? null}
             selected={selectedFor(selectedBundle.id)}
             dirty={bundleHasChanges(selectedBundle.id)}
             onToggleFile={(name) => toggleFile(selectedBundle.id, name)}
+            onToggleFiles={(names, checked) => toggleFiles(selectedBundle.id, names, checked)}
             onUpdateSourcePath={(path) => updateSourcePath(selectedBundle.id, path)}
             onReveal={(path) => void revealPath(path).catch(() => {})}
           />
@@ -590,11 +619,13 @@ function PublishConfirmDialog({ summaries, onCancel, onConfirm }: PublishConfirm
 
 interface BundlePanelProps {
   bundle: Bundle;
+  folderLabel: string;
   status: DiffStatus | null;
   entry: PublisherBundleState | null;
   selected: Set<string>;
   dirty: boolean;
   onToggleFile: (fileName: string) => void;
+  onToggleFiles: (fileNames: string[], checked: boolean) => void;
   onUpdateSourcePath: (path: string) => void;
   onReveal: (path: string) => void;
 }
@@ -612,19 +643,228 @@ function fileExt(name: string): string {
   return name.slice(i + 1).toLowerCase();
 }
 
+// ─── File tree types + helpers ─────────────────────────────────────────────
+
+interface FileTreeDir {
+  name: string;
+  dirs: FileTreeDir[];
+  files: Array<{ name: string; size: number }>;
+}
+
+function buildFileTree(files: Array<{ name: string; size: number }>): FileTreeDir {
+  const root: FileTreeDir = { name: "", dirs: [], files: [] };
+  for (const f of files) {
+    const parts = f.name.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      let child = node.dirs.find((d) => d.name === parts[i]);
+      if (!child) {
+        child = { name: parts[i], dirs: [], files: [] };
+        node.dirs.push(child);
+      }
+      node = child;
+    }
+    node.files.push(f);
+  }
+  function sortNode(n: FileTreeDir) {
+    n.dirs.sort((a, b) => a.name.localeCompare(b.name));
+    n.files.sort((a, b) => a.name.localeCompare(b.name));
+    n.dirs.forEach(sortNode);
+  }
+  sortNode(root);
+  return root;
+}
+
+function collectDirFileNames(dir: FileTreeDir): string[] {
+  return [
+    ...dir.files.map((f) => f.name),
+    ...dir.dirs.flatMap((d) => collectDirFileNames(d)),
+  ];
+}
+
+// ─── IndeterminateCheckbox ─────────────────────────────────────────────────
+
+function IndeterminateCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  onChange: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      className="h-3.5 w-3.5 shrink-0 accent-mcm-blue"
+    />
+  );
+}
+
+// ─── File row (module-level so React never remounts on re-render) ──────────
+
+interface FileRowItemProps {
+  f: { name: string; size: number };
+  displayName: string;
+  depth: number;
+  selected: Set<string>;
+  manifestSet: Set<string>;
+  modifiedNames: string[];
+  onToggleFile: (name: string) => void;
+}
+
+function FileRowItem({
+  f,
+  displayName,
+  depth,
+  selected,
+  manifestSet,
+  modifiedNames,
+  onToggleFile,
+}: FileRowItemProps) {
+  const isSelected = selected.has(f.name);
+  const inManifest = manifestSet.has(f.name);
+  const isModified = modifiedNames.includes(f.name);
+  let statusLabel = "";
+  let statusClass = "bg-border-soft text-muted";
+  if (isSelected && !inManifest) { statusLabel = "will add"; statusClass = "bg-success-bg text-success-fg"; }
+  else if (!isSelected && inManifest) { statusLabel = "will remove"; statusClass = "bg-error-bg text-error-fg"; }
+  else if (isSelected && isModified) { statusLabel = "modified"; statusClass = "bg-mcm-blue/15 text-mcm-blue"; }
+  else if (isSelected) { statusLabel = "in bundle"; statusClass = "bg-success-bg/60 text-success-fg"; }
+  else { statusLabel = "available"; statusClass = "bg-border-soft text-muted"; }
+  const ext = fileExt(f.name);
+  return (
+    <label
+      className="flex cursor-pointer items-center gap-2.5 border-b border-border-soft py-2 pr-3 text-[12px] last:border-b-0 hover:bg-surface"
+      style={{ paddingLeft: `${12 + depth * 16}px` }}
+    >
+      <input
+        type="checkbox"
+        checked={isSelected}
+        onChange={() => onToggleFile(f.name)}
+        className="h-3.5 w-3.5 shrink-0 accent-mcm-blue"
+      />
+      {ext && (
+        <span className="shrink-0 rounded bg-border-soft px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted">
+          {ext}
+        </span>
+      )}
+      <span className="flex-1 truncate font-medium text-ink">{displayName}</span>
+      <span className="shrink-0 tabular-nums text-[10.5px] text-muted">{formatBytes(f.size)}</span>
+      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusClass}`}>
+        {statusLabel}
+      </span>
+    </label>
+  );
+}
+
+// ─── Directory node (recursive, module-level) ──────────────────────────────
+
+interface DirNodeProps {
+  dir: FileTreeDir;
+  depth: number;
+  selected: Set<string>;
+  manifestSet: Set<string>;
+  modifiedNames: string[];
+  onToggleFile: (name: string) => void;
+  onToggleFiles: (names: string[], checked: boolean) => void;
+}
+
+function DirNode({
+  dir,
+  depth,
+  selected,
+  manifestSet,
+  modifiedNames,
+  onToggleFile,
+  onToggleFiles,
+}: DirNodeProps) {
+  const allNames = collectDirFileNames(dir);
+  const selCount = allNames.filter((n) => selected.has(n)).length;
+  const allSel = allNames.length > 0 && selCount === allNames.length;
+  const someSel = selCount > 0 && !allSel;
+  const inBundleCount = allNames.filter((n) => manifestSet.has(n)).length;
+
+  let folderBadge = "";
+  let folderBadgeClass = "bg-border-soft text-muted";
+  if (allSel && selCount > inBundleCount) { folderBadge = "will add"; folderBadgeClass = "bg-success-bg text-success-fg"; }
+  else if (selCount < inBundleCount) { folderBadge = "will remove"; folderBadgeClass = "bg-error-bg text-error-fg"; }
+  else if (allSel && inBundleCount > 0) { folderBadge = "in bundle"; folderBadgeClass = "bg-success-bg/60 text-success-fg"; }
+
+  const childProps = { selected, manifestSet, modifiedNames, onToggleFile, onToggleFiles };
+
+  return (
+    <details className="border-b border-border-soft last:border-b-0">
+      <summary
+        className="flex cursor-pointer list-none items-center gap-2.5 bg-surface py-2 pr-3 text-[12px] hover:bg-border-soft"
+        style={{ paddingLeft: `${12 + depth * 16}px` }}
+      >
+        <IndeterminateCheckbox
+          checked={allSel}
+          indeterminate={someSel}
+          onChange={() => onToggleFiles(allNames, !allSel)}
+        />
+        <IconFolder size={13} stroke={2} className="shrink-0 text-muted" />
+        <span className="flex-1 truncate font-medium text-ink">{dir.name}</span>
+        <span className="shrink-0 tabular-nums text-[10.5px] text-muted">
+          {selCount}/{allNames.length}
+        </span>
+        {folderBadge && (
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${folderBadgeClass}`}>
+            {folderBadge}
+          </span>
+        )}
+      </summary>
+      <div className="border-t border-border-soft">
+        {dir.dirs.map((child) => (
+          <DirNode key={child.name} dir={child} depth={depth + 1} {...childProps} />
+        ))}
+        {dir.files.map((f) => {
+          const basename = f.name.split("/").pop() ?? f.name;
+          return (
+            <FileRowItem
+              key={f.name}
+              f={f}
+              displayName={basename.replace(/\.[^.]+$/, "")}
+              depth={depth + 1}
+              selected={selected}
+              manifestSet={manifestSet}
+              modifiedNames={modifiedNames}
+              onToggleFile={onToggleFile}
+            />
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+// ─── Bundle file picker panel ──────────────────────────────────────────────
+
 function BundlePanel({
   bundle,
+  folderLabel,
   status,
   entry,
   selected,
   dirty,
   onToggleFile,
+  onToggleFiles,
   onUpdateSourcePath,
   onReveal,
 }: BundlePanelProps) {
   const sourcePath = entry?.sourcePath ?? "(scanning…)";
   const localFiles = status?.diff.currentFiles ?? [];
   const manifestSet = new Set(bundle.files);
+  const modifiedNames = status?.diff.modified ?? [];
+  const tree = buildFileTree(localFiles);
   const checkedCount = Array.from(selected).filter((n) =>
     localFiles.some((f) => f.name === n)
   ).length;
@@ -632,10 +872,50 @@ function BundlePanel({
     (n) => !localFiles.some((f) => f.name === n)
   ).length;
 
+  const overrideKey = `${bundle.category}:${bundle.presetType}`;
+  const pathOverrides = useAppStore((s) => s.persisted.pathOverrides);
+  const setPathOverride = useAppStore((s) => s.setPathOverride);
+  const resetPathOverride = useAppStore((s) => s.resetPathOverride);
+  const currentOverride = pathOverrides[overrideKey];
+
+  const [showTargetEdit, setShowTargetEdit] = useState(false);
+  const [defaultPath, setDefaultPath] = useState<string>("");
+  const [editValue, setEditValue] = useState("");
+
+  useEffect(() => {
+    const isTauriEnv = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    if (!isTauriEnv) return;
+    resolveTarget(bundle.category, bundle.presetType, folderLabel)
+      .then((r) => setDefaultPath(r.path))
+      .catch(() => setDefaultPath(""));
+  }, [bundle.category, bundle.presetType, folderLabel]);
+
+  const openTargetEdit = () => {
+    setEditValue(currentOverride ?? defaultPath);
+    setShowTargetEdit(true);
+  };
+
+  const saveTarget = async () => {
+    const val = editValue.trim();
+    if (val && val !== defaultPath) {
+      await setPathOverride(overrideKey, val);
+    } else if (!val || val === defaultPath) {
+      await resetPathOverride(overrideKey);
+    }
+    setShowTargetEdit(false);
+  };
+
+  const resetTarget = async () => {
+    await resetPathOverride(overrideKey);
+    setShowTargetEdit(false);
+  };
+
+  const effectiveTarget = currentOverride ?? defaultPath;
+
   return (
     <div className={`px-5 py-4 ${dirty ? "bg-update-row-bg" : ""}`}>
       {/* Source folder row */}
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="text-[12px] text-body">
             {checkedCount} of {localFiles.length} local files selected for bundle
@@ -643,6 +923,27 @@ function BundlePanel({
               <span className="ml-1.5 text-muted">· {remoteOnly} on another machine</span>
             )}
           </div>
+          {localFiles.length > 0 && (
+            <div className="mt-0.5 flex gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => onToggleFiles(localFiles.map((f) => f.name), true)}
+                className="text-mcm-blue hover:underline disabled:opacity-40"
+                disabled={checkedCount === localFiles.length}
+              >
+                Select all
+              </button>
+              <span className="text-muted">·</span>
+              <button
+                type="button"
+                onClick={() => onToggleFiles(localFiles.map((f) => f.name), false)}
+                className="text-muted hover:text-ink hover:underline disabled:opacity-40"
+                disabled={checkedCount === 0}
+              >
+                Deselect all
+              </button>
+            </div>
+          )}
         </div>
         <button
           type="button"
@@ -653,7 +954,71 @@ function BundlePanel({
           <IconFolderOpen size={13} stroke={2} />
           Open folder
         </button>
+        <button
+          type="button"
+          onClick={openTargetEdit}
+          className={`flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1.5 text-[12px] hover:bg-border-soft ${
+            currentOverride
+              ? "border-mcm-blue/40 bg-mcm-blue-tint text-mcm-blue"
+              : "border-border-strong bg-white text-body"
+          }`}
+          title={effectiveTarget || "Set install destination"}
+        >
+          <IconFolder size={13} stroke={2} />
+          {currentOverride ? "Custom target" : "Target folder"}
+        </button>
       </div>
+
+      {/* Target folder editor */}
+      {showTargetEdit && (
+        <div className="mb-3 rounded-md border border-mcm-blue/30 bg-mcm-blue-tint px-3 py-2.5">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-[11px] font-medium text-mcm-blue">Install destination on this machine</span>
+            <button
+              type="button"
+              onClick={() => setShowTargetEdit(false)}
+              className="rounded p-0.5 text-muted hover:text-ink"
+            >
+              <IconX size={13} stroke={2} />
+            </button>
+          </div>
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              autoFocus
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void saveTarget();
+                if (e.key === "Escape") setShowTargetEdit(false);
+              }}
+              placeholder={defaultPath || "Paste folder path…"}
+              className="min-w-0 flex-1 rounded-md border border-border-strong bg-white px-2 py-1 font-mono text-[11px] text-ink focus:border-mcm-blue focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => void saveTarget()}
+              className="shrink-0 rounded-md bg-mcm-blue px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90"
+            >
+              Save
+            </button>
+          </div>
+          {defaultPath && (
+            <div className="mt-1.5 flex items-center justify-between">
+              <span className="break-all font-mono text-[10px] text-muted">{effectiveTarget || defaultPath}</span>
+              {currentOverride && (
+                <button
+                  type="button"
+                  onClick={() => void resetTarget()}
+                  className="ml-2 shrink-0 text-[10px] text-muted hover:text-error-fg hover:underline"
+                >
+                  Reset to default
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* File list */}
       {status?.diff && !status.diff.sourceExists ? (
@@ -674,57 +1039,30 @@ function BundlePanel({
         </div>
       ) : (
         <div className="overflow-hidden rounded-md border border-border bg-white">
-          {localFiles.map((f) => {
-            const isSelected = selected.has(f.name);
-            const inManifest = manifestSet.has(f.name);
-            const isModified = status?.diff.modified.includes(f.name) ?? false;
-            let statusLabel = "";
-            let statusClass = "bg-border-soft text-muted";
-            if (isSelected && !inManifest) {
-              statusLabel = "will add";
-              statusClass = "bg-success-bg text-success-fg";
-            } else if (!isSelected && inManifest) {
-              statusLabel = "will remove";
-              statusClass = "bg-error-bg text-error-fg";
-            } else if (isSelected && isModified) {
-              statusLabel = "modified";
-              statusClass = "bg-mcm-blue/15 text-mcm-blue";
-            } else if (isSelected) {
-              statusLabel = "in bundle";
-              statusClass = "bg-success-bg/60 text-success-fg";
-            } else {
-              statusLabel = "available";
-              statusClass = "bg-border-soft text-muted";
-            }
-            const ext = fileExt(f.name);
-            return (
-              <label
-                key={f.name}
-                className="flex cursor-pointer items-center gap-2.5 border-b border-border-soft px-3 py-2 text-[12px] last:border-b-0 hover:bg-surface"
-              >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => onToggleFile(f.name)}
-                  className="h-3.5 w-3.5 shrink-0 accent-mcm-blue"
-                />
-                {ext && (
-                  <span className="shrink-0 rounded bg-border-soft px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted">
-                    {ext}
-                  </span>
-                )}
-                <span className="flex-1 truncate font-medium text-ink">
-                  {f.name.replace(/\.[^.]+$/, "")}
-                </span>
-                <span className="shrink-0 tabular-nums text-[10.5px] text-muted">
-                  {formatBytes(f.size)}
-                </span>
-                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusClass}`}>
-                  {statusLabel}
-                </span>
-              </label>
-            );
-          })}
+          {tree.dirs.map((dir) => (
+            <DirNode
+              key={dir.name}
+              dir={dir}
+              depth={0}
+              selected={selected}
+              manifestSet={manifestSet}
+              modifiedNames={modifiedNames}
+              onToggleFile={onToggleFile}
+              onToggleFiles={onToggleFiles}
+            />
+          ))}
+          {tree.files.map((f) => (
+            <FileRowItem
+              key={f.name}
+              f={f}
+              displayName={(f.name.split("/").pop() ?? f.name).replace(/\.[^.]+$/, "")}
+              depth={0}
+              selected={selected}
+              manifestSet={manifestSet}
+              modifiedNames={modifiedNames}
+              onToggleFile={onToggleFile}
+            />
+          ))}
         </div>
       )}
 

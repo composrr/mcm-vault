@@ -85,30 +85,33 @@ fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
 }
 
 fn scan_folder(path: &Path) -> Vec<ScannedFile> {
-    let Ok(read) = std::fs::read_dir(path) else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
-    for entry in read.flatten() {
-        let p = entry.path();
-        if !p.is_file() {
-            continue;
-        }
-        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if name.starts_with('.') || name.eq_ignore_ascii_case("_PLACEHOLDER.md") {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        out.push(ScannedFile {
-            name: name.to_string(),
-            size: meta.len(),
-            mtime_ms: mtime_ms(&meta),
-        });
-    }
+    scan_recursive(path, path, &mut out);
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
+}
+
+fn scan_recursive(base: &Path, current: &Path, out: &mut Vec<ScannedFile>) {
+    let Ok(read) = std::fs::read_dir(current) else { return };
+    for entry in read.flatten() {
+        let p = entry.path();
+        let Some(file_name) = p.file_name().and_then(|n| n.to_str()) else { continue };
+        if file_name.starts_with('.') || file_name.eq_ignore_ascii_case("_PLACEHOLDER.md") {
+            continue;
+        }
+        if p.is_dir() {
+            scan_recursive(base, &p, out);
+        } else if p.is_file() {
+            let rel = p.strip_prefix(base).unwrap_or(&p);
+            let name = rel.to_string_lossy().replace('\\', "/");
+            let Ok(meta) = entry.metadata() else { continue };
+            out.push(ScannedFile {
+                name,
+                size: meta.len(),
+                mtime_ms: mtime_ms(&meta),
+            });
+        }
+    }
 }
 
 fn diff_for_bundle(

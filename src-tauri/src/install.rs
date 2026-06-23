@@ -307,6 +307,13 @@ pub async fn install_bundle(
                     message: e.to_string(),
                 })?;
             let dst = dst_dir.join(&basename);
+            if let Some(parent) = dst.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| InstallError::Io {
+                        message: e.to_string(),
+                    })?;
+            }
             tokio::fs::copy(src, &dst)
                 .await
                 .map_err(|e| InstallError::Io {

@@ -9,14 +9,11 @@ import {
   IconUpload,
   IconDownload,
   IconTrash,
-  IconPencil,
-  IconX,
 } from "@tabler/icons-react";
 import type { AppSettings, InstallTargets } from "../types";
 import {
   listInstallTargetVersions,
   readRecentLog,
-  resolveTarget,
   type DetectedVersion,
   type DiagnosticReport,
   type InstallTargetVersions,
@@ -170,11 +167,6 @@ export function SettingsPanel({
               Changing this won't move existing files; click <em>Update all</em> on the main view to reinstall to the new path.
             </div>
           </div>
-        </section>
-
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">CUSTOM PATHS</div>
-          <CustomPathsSection folderLabel={settings.folderLabel || "MCM Vault"} />
         </section>
 
         <section>
@@ -807,171 +799,6 @@ function WipeMachineSection() {
   );
 }
 
-const OVERRIDABLE_PRESETS: { key: string; label: string }[] = [
-  { key: "resolve:lut", label: "Resolve LUTs" },
-  { key: "resolve:fusion", label: "Fusion Templates" },
-  { key: "resolve:fairlight", label: "Fairlight Presets" },
-  { key: "premiere:lut", label: "Premiere Technical LUTs" },
-  { key: "premiere:lumetri", label: "Creative Looks (Lumetri)" },
-  { key: "premiere:mogrt", label: "Motion Graphics Templates" },
-  { key: "premiere:caption", label: "Caption / Text Styles" },
-];
-
-function CustomPathsSection({ folderLabel }: { folderLabel: string }) {
-  const pathOverrides = useAppStore((s) => s.persisted.pathOverrides);
-  const setPathOverride = useAppStore((s) => s.setPathOverride);
-  const resetPathOverride = useAppStore((s) => s.resetPathOverride);
-  const isTauriEnv =
-    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-  const [defaults, setDefaults] = useState<Record<string, string>>({});
-  const [editing, setEditing] = useState<Record<string, string>>({});
-  const [activeEdit, setActiveEdit] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isTauriEnv) return;
-    const load = async () => {
-      const results: Record<string, string> = {};
-      for (const { key } of OVERRIDABLE_PRESETS) {
-        const [category, presetType] = key.split(":");
-        try {
-          const r = await resolveTarget(category, presetType, folderLabel);
-          results[key] = r.path;
-        } catch {
-          results[key] = "— (not resolved)";
-        }
-      }
-      setDefaults(results);
-    };
-    void load();
-  }, [folderLabel, isTauriEnv]);
-
-  const startEdit = (key: string) => {
-    setEditing((e) => ({ ...e, [key]: pathOverrides[key] ?? defaults[key] ?? "" }));
-    setActiveEdit(key);
-  };
-
-  const cancelEdit = (key: string) => {
-    setEditing((e) => { const n = { ...e }; delete n[key]; return n; });
-    setActiveEdit(null);
-  };
-
-  const saveEdit = async (key: string) => {
-    const val = (editing[key] ?? "").trim();
-    if (val) await setPathOverride(key, val);
-    cancelEdit(key);
-  };
-
-  const reset = async (key: string) => {
-    await resetPathOverride(key);
-  };
-
-  if (!isTauriEnv) {
-    return (
-      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] text-body">
-        Custom paths are only available in the desktop app.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[12px] leading-relaxed text-body">
-        Override where each preset type is installed on this machine. Leave empty to use the automatically resolved default.
-      </div>
-      <div className="overflow-hidden rounded-lg border border-border">
-        {OVERRIDABLE_PRESETS.map(({ key, label }, idx) => {
-          const override = pathOverrides[key];
-          const defaultPath = defaults[key] ?? "Resolving…";
-          const isEditing = activeEdit === key;
-          const effectivePath = override ?? defaultPath;
-
-          return (
-            <div
-              key={key}
-              className={`px-3.5 py-2.5 ${
-                idx < OVERRIDABLE_PRESETS.length - 1
-                  ? "border-b border-border-soft"
-                  : ""
-              } ${override ? "bg-mcm-blue-tint" : "bg-surface"}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] font-medium text-ink">{label}</span>
-                <div className="flex items-center gap-2">
-                  {override && !isEditing && (
-                    <button
-                      type="button"
-                      onClick={() => void reset(key)}
-                      className="text-[11px] text-muted hover:text-error-fg hover:underline"
-                    >
-                      Reset to default
-                    </button>
-                  )}
-                  {!isEditing && (
-                    <button
-                      type="button"
-                      onClick={() => startEdit(key)}
-                      aria-label={`Edit path for ${label}`}
-                      className="rounded p-0.5 text-muted hover:bg-border-soft hover:text-ink"
-                    >
-                      <IconPencil size={13} stroke={2} />
-                    </button>
-                  )}
-                  {isEditing && (
-                    <button
-                      type="button"
-                      onClick={() => cancelEdit(key)}
-                      aria-label="Cancel"
-                      className="rounded p-0.5 text-muted hover:bg-border-soft hover:text-ink"
-                    >
-                      <IconX size={13} stroke={2} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {!isEditing && (
-                <div className="mt-0.5 break-all font-mono text-[10.5px] text-body">
-                  {override ? (
-                    <span className="text-mcm-blue">{effectivePath}</span>
-                  ) : (
-                    <span className="text-muted">{effectivePath}</span>
-                  )}
-                </div>
-              )}
-
-              {isEditing && (
-                <div className="mt-1.5 flex gap-1.5">
-                  <input
-                    type="text"
-                    autoFocus
-                    value={editing[key] ?? ""}
-                    onChange={(e) =>
-                      setEditing((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void saveEdit(key);
-                      if (e.key === "Escape") cancelEdit(key);
-                    }}
-                    placeholder={defaultPath}
-                    className="min-w-0 flex-1 rounded-md border border-mcm-blue bg-white px-2 py-1 font-mono text-[11px] text-ink focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void saveEdit(key)}
-                    className="shrink-0 rounded-md bg-mcm-blue px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90"
-                  >
-                    Save
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function AppUpdateButton() {
   const [status, setStatus] = useState<
