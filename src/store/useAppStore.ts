@@ -94,6 +94,20 @@ export interface AppStore {
   markFirstRunComplete: () => void;
 }
 
+function extractTauriError(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Error) return raw.message;
+  if (typeof raw === "object" && raw !== null) {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    if (obj.kind === "cancelled") return "Installation cancelled";
+    if (typeof obj.app === "string") return `No ${obj.app} installation found`;
+    if (typeof obj.presetType === "string") return `Unknown preset type: ${String(obj.presetType)}`;
+    try { return JSON.stringify(obj); } catch { /* fall through */ }
+  }
+  return String(raw);
+}
+
 let progressUnlisten: (() => void) | null = null;
 let batchAborted = false;
 
@@ -238,10 +252,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         },
       }));
     } catch (raw) {
-      const message =
-        typeof raw === "object" && raw && "message" in raw
-          ? String((raw as { message?: unknown }).message ?? raw)
-          : String(raw);
+      const message = extractTauriError(raw);
       set((s) => ({
         runtime: {
           ...s.runtime,

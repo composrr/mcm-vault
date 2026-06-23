@@ -739,9 +739,7 @@ fn adobe_common_text_styles_path() -> Result<PathBuf, PathError> {
 
 fn resolve_lut_path() -> Result<PathBuf, PathError> {
     // Install to the root LUT folder — no <label> subfolder — so team LUTs
-    // appear alongside the user's personal LUTs in Resolve's browser rather
-    // than in a separate named group.
-    // On macOS Resolve stores LUTs in the system /Library, not ~/Library.
+    // appear alongside the user's personal LUTs in Resolve's browser.
     if cfg!(target_os = "windows") {
         Ok(programdata_dir()?
             .join("Blackmagic Design")
@@ -749,10 +747,21 @@ fn resolve_lut_path() -> Result<PathBuf, PathError> {
             .join("Support")
             .join("LUT"))
     } else {
-        Ok(programdata_dir()?
+        // macOS: prefer system /Library (where Resolve reads by default), but
+        // fall back to ~/Library if the system path isn't writable (SIP or perms).
+        let system = programdata_dir()?
             .join("Blackmagic Design")
             .join("DaVinci Resolve")
-            .join("LUT"))
+            .join("LUT");
+        if system.exists() || system.parent().map(|p| is_writable(p)).unwrap_or(false) {
+            Ok(system)
+        } else {
+            // User-level LUT dir — writable without sudo; Resolve scans both.
+            Ok(appdata_roaming()?
+                .join("Blackmagic Design")
+                .join("DaVinci Resolve")
+                .join("LUT"))
+        }
     }
 }
 
