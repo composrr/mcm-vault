@@ -26,9 +26,12 @@ pub fn bundle_file_url(bundle_path: &str, file_name: &str) -> String {
         "https://raw.githubusercontent.com/{}/{}/{}/{}",
         REPO_OWNER, REPO_NAME, REPO_BRANCH, bundle_path
     );
-    // Percent-encode each byte of the file name so spaces and special chars work
+    // Percent-encode only bytes that must be encoded in URL path segments.
+    // Unreserved chars + common sub-delimiters + path separator are left as-is.
     let encoded: String = file_name.bytes().flat_map(|b| match b {
-        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+        | b'-' | b'_' | b'.' | b'~' | b'/'  // unreserved + path sep
+        | b',' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b';' | b'=' | b'@' => {
             vec![b as char]
         }
         b => format!("%{b:02X}").chars().collect::<Vec<_>>(),

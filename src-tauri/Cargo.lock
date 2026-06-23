@@ -2087,7 +2087,7 @@ dependencies = [
 
 [[package]]
 name = "mcm-vault"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
