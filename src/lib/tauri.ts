@@ -186,6 +186,10 @@ export async function openVaultFolder(): Promise<string> {
   return invoke<string>("open_vault_folder");
 }
 
+export async function checkPathsExist(paths: string[]): Promise<boolean[]> {
+  return invoke<boolean[]>("check_paths_exist", { paths });
+}
+
 export async function revealBundleFolder(
   category: string,
   presetType: string,

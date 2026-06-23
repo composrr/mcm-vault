@@ -35,10 +35,10 @@ export function InstallProgressModal({
     .filter(Boolean) as NonNullable<Manifest["bundles"][number]>[];
 
   const doneCount = sessionIds.filter(
-    (id) => !runtime[id]?.installing && (runtime[id]?.progress || runtime[id]?.errorMessage)
+    (id) => runtime[id]?.completed || runtime[id]?.errorMessage
   ).length;
   const errorCount = sessionIds.filter((id) => !!runtime[id]?.errorMessage).length;
-  const allDone = sessionIds.length > 0 && sessionIds.every((id) => !runtime[id]?.installing);
+  const allDone = sessionIds.length > 0 && doneCount === sessionIds.length;
 
   const handlePause = async () => {
     setPaused(true);
@@ -110,7 +110,7 @@ export function InstallProgressModal({
             const state = runtime[bundle.id];
             const isInstalling = !!state?.installing;
             const hasError = !!state?.errorMessage;
-            const isDone = !isInstalling && (!!state?.progress || hasError);
+            const isDone = !!state?.completed;
             const progress = state?.progress;
             const pct =
               progress && progress.total > 0

@@ -19,7 +19,6 @@ import {
   openLogFolder,
   openVaultFolder,
   revealBundleFolder,
-  revealPath,
 } from "./lib/tauri";
 
 type View = "main" | "detail" | "settings" | "publish";
@@ -326,23 +325,11 @@ function App() {
             setView("main");
           }}
           onReveal={() => {
-            // We want to open the install FOLDER, never a specific file (the
-            // file may have been renamed or removed since we tracked it).
-            // Derive the parent dir from the first tracked path and pass that
-            // to reveal_path. Fall back to the canonical install dir if we
-            // haven't installed anything yet.
-            const installed = persisted.installedBundles[selectedBundle.id];
-            const first = installed?.files[0];
-            const dir = first?.replace(/[\\/][^\\/]+$/, "");
-            if (dir) {
-              void revealPath(dir);
-            } else {
-              void revealBundleFolder(
-                selectedBundle.category,
-                selectedBundle.presetType,
-                persisted.settings.folderLabel || "MCM Vault"
-              ).catch((e) => console.error("reveal_bundle_folder failed", e));
-            }
+            void revealBundleFolder(
+              selectedBundle.category,
+              selectedBundle.presetType,
+              persisted.settings.folderLabel || "MCM Vault"
+            ).catch((e) => console.error("reveal_bundle_folder failed", e));
           }}
           onRestore={() => {
             const installed = persisted.installedBundles[selectedBundle.id];
@@ -419,18 +406,11 @@ function App() {
           }
           onClose={() => setManualModalBundleId(null)}
           onReveal={() => {
-            const installed = persisted.installedBundles[manualBundle.id];
-            const first = installed?.files[0];
-            const dir = first?.replace(/[\\/][^\\/]+$/, "");
-            if (dir) {
-              void revealPath(dir);
-            } else {
-              void revealBundleFolder(
-                manualBundle.category,
-                manualBundle.presetType,
-                persisted.settings.folderLabel || "MCM Vault"
-              ).catch((e) => console.error("reveal_bundle_folder failed", e));
-            }
+            void revealBundleFolder(
+              manualBundle.category,
+              manualBundle.presetType,
+              persisted.settings.folderLabel || "MCM Vault"
+            ).catch((e) => console.error("reveal_bundle_folder failed", e));
             setManualModalBundleId(null);
           }}
         />

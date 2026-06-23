@@ -49,6 +49,7 @@ pub fn run() {
             install::pause_install,
             install::resume_install,
             install::cancel_install,
+            install::check_paths_exist,
             publisher::scan_publish_diffs,
             publisher::publish_bundles,
             publisher::publisher_default_source,

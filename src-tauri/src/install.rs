@@ -52,6 +52,11 @@ pub fn cancel_install(control: tauri::State<'_, Arc<InstallControl>>) {
     let _ = control.pause_tx.send(false); // unblock pause so cancel can proceed
 }
 
+#[tauri::command]
+pub fn check_paths_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.iter().map(|p| std::path::Path::new(p).exists()).collect()
+}
+
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]

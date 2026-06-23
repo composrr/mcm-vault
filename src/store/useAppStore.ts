@@ -1,6 +1,7 @@
 ﻿import { create } from "zustand";
 import {
   cancelInstall,
+  checkPathsExist,
   exportMachineConfig,
   fetchManifest,
   importMachineConfig,
@@ -61,6 +62,7 @@ export type FetchStatus = "idle" | "loading" | "success" | "offline" | "error";
 
 export interface BundleRuntimeState {
   installing?: boolean;
+  completed?: boolean;
   errorMessage?: string;
   progress?: InstallProgress;
 }
@@ -193,10 +195,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const now = new Date().toISOString();
     try {
       const manifest = await fetchManifest();
+
+      // Verify locally installed bundles still exist on disk. Check one file
+      // per bundle — if the first tracked file is gone the directory was likely
+      // deleted. Clear the install record so the UI shows it as needing install.
+      const installedBundles = { ...get().persisted.installedBundles };
+      const bundleIds = Object.keys(installedBundles);
+      const probeFiles = bundleIds.map((id) => installedBundles[id].files[0] ?? "");
+      if (probeFiles.some(Boolean)) {
+        const exists = await checkPathsExist(probeFiles);
+        for (let i = 0; i < bundleIds.length; i++) {
+          if (probeFiles[i] && !exists[i]) {
+            delete installedBundles[bundleIds[i]];
+          }
+        }
+      }
+
       const next = await persist(get, {
         lastChecked: now,
         lastSuccessfulSync: now,
         lastKnownManifest: manifest,
+        installedBundles,
       });
       set({
         manifest,
@@ -221,7 +240,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({
       runtime: {
         ...s.runtime,
-        [id]: { installing: true, errorMessage: undefined },
+        [id]: { installing: true, errorMessage: undefined, completed: false },
       },
     }));
     try {
@@ -249,7 +268,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         persisted: next,
         runtime: {
           ...s.runtime,
-          [id]: { installing: false },
+          [id]: { installing: false, completed: true },
         },
       }));
     } catch (raw) {
