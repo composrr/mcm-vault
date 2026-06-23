@@ -210,23 +210,7 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     });
   };
 
-  const toggleRemoteFile = (bundleId: string, repoName: string) => {
-    const existing = persisted.publisher[bundleId];
-    const cur = new Set(existing?.excludedRemoteFiles ?? []);
-    if (cur.has(repoName)) cur.delete(repoName);
-    else cur.add(repoName);
-    setPersisted({
-      publisher: {
-        ...persisted.publisher,
-        [bundleId]: {
-          ...(existing ?? { sourcePath: "", lastPublishedFiles: {}, lastPublishedAt: null, lastPublishedVersion: null, includedFiles: [] }),
-          excludedRemoteFiles: Array.from(cur).sort(),
-        },
-      },
-    });
-  };
-
-  const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) => {
+const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) => {
     const existing = persisted.publisher[bundleId];
     const cur = new Set(existing?.includedFiles ?? []);
     for (const name of fileNames) {
@@ -480,12 +464,10 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
             entry={publisherEntries[selectedBundle.id] ?? null}
             selected={selectedFor(selectedBundle.id)}
             dirty={bundleHasChanges(selectedBundle.id)}
-            excludedRemoteFiles={new Set(persisted.publisher[selectedBundle.id]?.excludedRemoteFiles ?? [])}
             onToggleFile={(name) => toggleFile(selectedBundle.id, name)}
             onToggleFiles={(names, checked) => toggleFiles(selectedBundle.id, names, checked)}
             onUpdateSourcePath={(path) => updateSourcePath(selectedBundle.id, path)}
             onReveal={(path) => void revealPath(path).catch(() => {})}
-            onToggleRemoteFile={(repoName) => toggleRemoteFile(selectedBundle.id, repoName)}
           />
         ) : (
           /* Bundle list — grouped by category */
@@ -858,22 +840,19 @@ interface BundlePanelProps {
   entry: PublisherBundleState | null;
   selected: Set<string>;
   dirty: boolean;
-  excludedRemoteFiles: Set<string>;
   onToggleFile: (fileName: string) => void;
   onToggleFiles: (fileNames: string[], checked: boolean) => void;
   onUpdateSourcePath: (path: string) => void;
   onReveal: (path: string) => void;
-  onToggleRemoteFile: (repoName: string) => void;
 }
 
-function BundlePanel({ bundle, folderLabel, status, entry, selected, dirty, excludedRemoteFiles, onToggleFile, onToggleFiles, onUpdateSourcePath, onReveal, onToggleRemoteFile }: BundlePanelProps) {
+function BundlePanel({ bundle, folderLabel, status, entry, selected, dirty, onToggleFile, onToggleFiles, onUpdateSourcePath, onReveal }: BundlePanelProps) {
   const sourcePath = entry?.sourcePath ?? "(scanning…)";
   const localFiles = status?.diff.currentFiles ?? [];
   const manifestSet = new Set(bundle.files);
   const modifiedNames = status?.diff.modified ?? [];
   const tree = buildFileTree(localFiles);
   const checkedCount = Array.from(selected).filter((n) => localFiles.some((f) => f.name === n)).length;
-  const remoteOnlyFiles = bundle.files.filter((n) => !localFiles.some((f) => f.name === n));
 
   const overrideKey = `${bundle.category}:${bundle.presetType}`;
   const pathOverrides = useAppStore((s) => s.persisted.pathOverrides);
@@ -913,7 +892,6 @@ function BundlePanel({ bundle, folderLabel, status, entry, selected, dirty, excl
         <div className="min-w-0 flex-1">
           <div className="text-[12px] text-body">
             {checkedCount} of {localFiles.length} local files selected
-            {remoteOnlyFiles.length > 0 && <span className="ml-1.5 text-muted">· {remoteOnlyFiles.length} on another machine</span>}
           </div>
           {localFiles.length > 0 && (
             <div className="mt-0.5 flex gap-2 text-[11px]">
@@ -992,32 +970,6 @@ function BundlePanel({ bundle, folderLabel, status, entry, selected, dirty, excl
         </div>
       )}
 
-      {remoteOnlyFiles.length > 0 && (
-        <div className="mt-3">
-          <div className="mb-1 text-[10.5px] font-medium text-muted uppercase tracking-wide">From another machine</div>
-          <div className="overflow-hidden rounded-md border border-border bg-white">
-            {remoteOnlyFiles.map((repoName) => {
-              const excluded = excludedRemoteFiles.has(repoName);
-              const basename = repoName.split("/").pop() ?? repoName;
-              return (
-                <label key={repoName} className="flex cursor-pointer items-center gap-2.5 border-b border-border-soft py-2 pr-3 text-[12px] last:border-b-0 hover:bg-surface px-3">
-                  <input
-                    type="checkbox"
-                    checked={!excluded}
-                    onChange={() => onToggleRemoteFile(repoName)}
-                    className="h-3.5 w-3.5 shrink-0 accent-mcm-blue"
-                  />
-                  <span className={`flex-1 truncate ${excluded ? "line-through text-muted" : "text-ink"}`}>{basename.replace(/\.[^.]+$/, "")}</span>
-                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${excluded ? "bg-error-bg text-error-fg" : "bg-border-soft text-muted"}`}>
-                    {excluded ? "will remove" : "remote only"}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          <div className="mt-1 text-[10px] text-muted">Uncheck to remove from manifest on next publish.</div>
-        </div>
-      )}
 
       <details className="mt-3 group">
         <summary className="cursor-pointer select-none list-none text-[10.5px] text-muted hover:text-body">
