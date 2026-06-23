@@ -112,6 +112,7 @@ export interface InstallResult {
   installType: "auto" | "manual";
   installedFiles: string[];
   installDir: string;
+  fileSizes: Record<string, number>;
   previousInstall?: PreviousInstall;
 }
 
@@ -138,11 +139,13 @@ export async function listInstallTargetVersions(): Promise<InstallTargetVersions
 
 export async function installBundle(
   bundle: Bundle,
-  pathOverride?: string | null
+  pathOverride?: string | null,
+  priorFileSizes?: Record<string, number> | null
 ): Promise<InstallResult> {
   return invoke<InstallResult>("install_bundle", {
     bundle,
     pathOverride: pathOverride ?? null,
+    priorFileSizes: priorFileSizes ?? null,
   });
 }
 

@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Window};
 
@@ -102,6 +104,9 @@ pub struct InstallResult {
     pub install_type: String,
     pub installed_files: Vec<String>,
     pub install_dir: String,
+    /// Per-file sizes (bytes) after install. Stored by the frontend and passed
+    /// back on the next install so unchanged files can be skipped.
+    pub file_sizes: HashMap<String, u64>,
     /// Snapshot of the previous install (if any). Frontend persists this in
     /// state.installedBundles[id].previousInstall so the user can restore.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,7 +123,8 @@ fn http_client() -> Result<reqwest::Client, InstallError> {
         })
 }
 
-async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result<(), InstallError> {
+/// Downloads `url` to `dest` and returns the number of bytes written.
+async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result<u64, InstallError> {
     let resp = client
         .get(url)
         .send()
@@ -136,6 +142,7 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result
     let bytes = resp.bytes().await.map_err(|e| InstallError::Network {
         message: e.to_string(),
     })?;
+    let len = bytes.len() as u64;
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -148,7 +155,7 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result
         .map_err(|e| InstallError::Io {
             message: e.to_string(),
         })?;
-    Ok(())
+    Ok(len)
 }
 
 async fn current_settings() -> (String, state::InstallTargets) {
@@ -255,14 +262,12 @@ pub async fn install_bundle(
     window: Window,
     bundle: Bundle,
     path_override: Option<String>,
+    prior_file_sizes: Option<HashMap<String, u64>>,
     control: tauri::State<'_, Arc<InstallControl>>,
 ) -> Result<InstallResult, InstallError> {
     control.reset();
-    let mut pause_rx = control.pause_rx.clone();
     let (folder_label, install_targets) = current_settings().await;
 
-    // Resolve all target install dirs. A user-supplied path_override bypasses
-    // auto-detection entirely and installs to exactly that one directory.
     let targets = if let Some(ref custom) = path_override {
         vec![path_resolver::ResolvedTarget {
             path: custom.clone(),
@@ -277,7 +282,6 @@ pub async fn install_bundle(
         )?
     };
 
-    // Snapshot the previous install (if any) before overwriting.
     let app_state = state::read_state().await.ok();
     let previous_install = if let Some(s) = &app_state {
         if let Some(prev) = s.installed_bundles.get(&bundle.id) {
@@ -296,74 +300,137 @@ pub async fn install_bundle(
             bundle.id,
             bundle.version,
             bundle.files.len(),
-            targets
-                .iter()
-                .map(|t| t.path.as_str())
-                .collect::<Vec<_>>()
-                .join(" | ")
+            targets.iter().map(|t| t.path.as_str()).collect::<Vec<_>>().join(" | ")
         ),
     );
 
-    // Download once into staging.
     let staging_root = state::app_data_dir()
-        .map_err(|e| InstallError::Path {
-            message: e.to_string(),
-        })?
+        .map_err(|e| InstallError::Path { message: e.to_string() })?
         .join("staging")
         .join(&bundle.id);
     tokio::fs::create_dir_all(&staging_root)
         .await
-        .map_err(|e| InstallError::Io {
-            message: e.to_string(),
-        })?;
+        .map_err(|e| InstallError::Io { message: e.to_string() })?;
 
     let client = http_client()?;
     let total = bundle.files.len();
-    let mut staged: Vec<(PathBuf, String)> = Vec::with_capacity(total);
+    let prior_sizes = prior_file_sizes.unwrap_or_default();
 
-    for (idx, file_name) in bundle.files.iter().enumerate() {
-        // Check cancel before each file
-        if control.cancel.load(Ordering::Relaxed) {
-            let _ = tokio::fs::remove_dir_all(&staging_root).await;
-            return Err(InstallError::Cancelled);
+    // Skip files whose local size already matches the stored size.
+    // Check against the first target's resolved path (primary install location).
+    let primary_dir = targets.first().map(|t| PathBuf::from(&t.path)).unwrap_or_default();
+    let mut to_download: Vec<String> = Vec::new();
+    let mut skipped_sizes: HashMap<String, u64> = HashMap::new();
+
+    for file_name in &bundle.files {
+        if let Some(&stored_size) = prior_sizes.get(file_name.as_str()) {
+            if let Some((dst_dir, basename)) =
+                route_for_file(&bundle.preset_type, &primary_dir, file_name)
+            {
+                if let Ok(meta) = std::fs::metadata(dst_dir.join(&basename)) {
+                    if meta.len() == stored_size {
+                        skipped_sizes.insert(file_name.clone(), stored_size);
+                        continue;
+                    }
+                }
+            }
         }
-
-        // Wait while paused (non-blocking if not paused)
-        loop {
-            let is_paused = *pause_rx.borrow_and_update();
-            if !is_paused { break; }
-            if pause_rx.changed().await.is_err() { break; }
-        }
-
-        // Re-check cancel after resuming from pause
-        if control.cancel.load(Ordering::Relaxed) {
-            let _ = tokio::fs::remove_dir_all(&staging_root).await;
-            return Err(InstallError::Cancelled);
-        }
-
-        let _ = window.emit(
-            "install-progress",
-            InstallProgress {
-                bundle_id: bundle.id.clone(),
-                current_file: file_name.clone(),
-                completed: idx,
-                total,
-            },
-        );
-        let url = branding::bundle_file_url(&bundle.path, file_name);
-        let staged_path = staging_root.join(file_name);
-        download_to(&client, &url, &staged_path).await.map_err(|e| {
-            let _ = std::fs::remove_dir_all(&staging_root);
-            e
-        })?;
-        staged.push((staged_path, file_name.clone()));
+        to_download.push(file_name.clone());
     }
 
-    // Copy the staged files into every target dir.
+    let skip_count = skipped_sizes.len();
+    let download_count = to_download.len();
+    state::log_event(
+        "INFO",
+        format!("install_bundle id={} skipping {skip_count} unchanged, downloading {download_count}", bundle.id),
+    );
+
+    // Emit initial progress (skipped files count as already done).
+    let _ = window.emit(
+        "install-progress",
+        InstallProgress {
+            bundle_id: bundle.id.clone(),
+            current_file: String::new(),
+            completed: skip_count,
+            total,
+        },
+    );
+
+    if control.cancel.load(Ordering::Relaxed) {
+        let _ = tokio::fs::remove_dir_all(&staging_root).await;
+        return Err(InstallError::Cancelled);
+    }
+
+    // Download needed files concurrently (up to 8 at a time).
+    let done_counter = Arc::new(AtomicUsize::new(skip_count));
+    let staging_arc = Arc::new(staging_root.clone());
+
+    let download_futures = to_download.into_iter().map(|file_name| {
+        let client = client.clone();
+        let staging = staging_arc.clone();
+        let bundle_id = bundle.id.clone();
+        let bundle_path = bundle.path.clone();
+        let preset_type = bundle.preset_type.clone();
+        let done_counter = done_counter.clone();
+        let window = window.clone();
+
+        async move {
+            let url = branding::bundle_file_url(&bundle_path, &file_name);
+            let staged_path = staging.join(&file_name);
+            let byte_count = download_to(&client, &url, &staged_path).await?;
+            let completed = done_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            let _ = window.emit(
+                "install-progress",
+                InstallProgress {
+                    bundle_id,
+                    current_file: file_name.clone(),
+                    completed,
+                    total,
+                },
+            );
+            Ok::<(PathBuf, String, String, u64), InstallError>((staged_path, file_name, preset_type, byte_count))
+        }
+    });
+
+    let results: Vec<Result<(PathBuf, String, String, u64), InstallError>> =
+        stream::iter(download_futures).buffer_unordered(8).collect().await;
+
+    // Surface the first download error (cleanup staging, then bail).
+    let mut staged: Vec<(PathBuf, String, u64)> = Vec::with_capacity(download_count);
+    for result in results {
+        match result {
+            Ok((path, name, _pt, size)) => staged.push((path, name, size)),
+            Err(e) => {
+                let _ = tokio::fs::remove_dir_all(&staging_root).await;
+                return Err(e);
+            }
+        }
+    }
+
+    if control.cancel.load(Ordering::Relaxed) {
+        let _ = tokio::fs::remove_dir_all(&staging_root).await;
+        return Err(InstallError::Cancelled);
+    }
+
+    // Copy staged files into every target dir; build installed_files + file_sizes.
     let mut installed_files = Vec::with_capacity(total * targets.len().max(1));
+    let mut file_sizes: HashMap<String, u64> = HashMap::with_capacity(total);
+
     for target in &targets {
         let install_dir = PathBuf::from(&target.path);
-        for (src, name) in &staged {
+
+        // Skipped files are already in place — just record their paths.
+        for (name, &size) in &skipped_sizes {
+            if let Some((dst_dir, basename)) =
+                route_for_file(&bundle.preset_type, &install_dir, name)
+            {
+                installed_files.push(dst_dir.join(&basename).to_string_lossy().to_string());
+                file_sizes.entry(name.clone()).or_insert(size);
+            }
+        }
+
+        // Copy downloaded files.
+        for (src, name, size) in &staged {
             let Some((dst_dir, basename)) =
                 route_for_file(&bundle.preset_type, &install_dir, name)
             else {
@@ -371,35 +438,24 @@ pub async fn install_bundle(
             };
             tokio::fs::create_dir_all(&dst_dir)
                 .await
-                .map_err(|e| InstallError::Io {
-                    message: e.to_string(),
-                })?;
+                .map_err(|e| InstallError::Io { message: e.to_string() })?;
             let dst = dst_dir.join(&basename);
             if let Some(parent) = dst.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await
-                    .map_err(|e| InstallError::Io {
-                        message: e.to_string(),
-                    })?;
+                    .map_err(|e| InstallError::Io { message: e.to_string() })?;
             }
             tokio::fs::copy(src, &dst)
                 .await
-                .map_err(|e| InstallError::Io {
-                    message: e.to_string(),
-                })?;
+                .map_err(|e| InstallError::Io { message: e.to_string() })?;
             installed_files.push(dst.to_string_lossy().to_string());
+            file_sizes.entry(name.clone()).or_insert(*size);
         }
     }
 
     let _ = tokio::fs::remove_dir_all(&staging_root).await;
 
-    // Clean up stale tracked files: anything we wrote in the prior install that
-    // isn't in this install. This catches renames so receivers don't end up
-    // with both old + new copies of the same preset. We only ever delete files
-    // we previously wrote (tracked in installed_bundles[id].files) — user-
-    // created files in the same folder are not touched. The previous install
-    // was already snapshotted above, so the Restore button brings these back
-    // if a maintainer publishes a bundle by mistake.
+    // Clean up stale tracked files (renames, removed bundle members).
     let mut removed_stale = 0usize;
     if let Some(prev) = app_state
         .as_ref()
@@ -411,20 +467,14 @@ pub async fn install_bundle(
             if p.exists() {
                 match tokio::fs::remove_file(p).await {
                     Ok(_) => removed_stale += 1,
-                    Err(e) => state::log_event(
-                        "WARN",
-                        format!("cleanup stale file failed: {stale}: {e}"),
-                    ),
+                    Err(e) => state::log_event("WARN", format!("cleanup stale file failed: {stale}: {e}")),
                 }
             }
         }
         if removed_stale > 0 {
             state::log_event(
                 "INFO",
-                format!(
-                    "install_bundle id={} cleaned {removed_stale} stale file(s) from prior install",
-                    bundle.id
-                ),
+                format!("install_bundle id={} cleaned {removed_stale} stale file(s)", bundle.id),
             );
         }
     }
@@ -439,20 +489,15 @@ pub async fn install_bundle(
         },
     );
 
-    let first_target = targets
-        .first()
-        .map(|t| t.path.clone())
-        .unwrap_or_default();
-    let install_type = targets
-        .first()
-        .map(|t| t.install_type.clone())
-        .unwrap_or_else(|| "auto".into());
+    let first_target = targets.first().map(|t| t.path.clone()).unwrap_or_default();
+    let install_type = targets.first().map(|t| t.install_type.clone()).unwrap_or_else(|| "auto".into());
 
     Ok(InstallResult {
         bundle_id: bundle.id.clone(),
         install_type,
         installed_files,
         install_dir: first_target,
+        file_sizes,
         previous_install,
     })
 }

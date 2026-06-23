@@ -230,12 +230,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // are simply untracked. Explicit Remove still deletes via removeBundle.
       const overrideKey = `${bundle.category}:${bundle.presetType}`;
       const pathOverride = get().persisted.pathOverrides[overrideKey] ?? null;
-      const result = await installBundle(bundle, pathOverride);
       const prior = get().persisted.installedBundles[id];
+      const result = await installBundle(bundle, pathOverride, prior?.fileSizes ?? null);
       const installed: InstalledBundleState = {
         version: bundle.version,
         installedAt: new Date().toISOString(),
         files: result.installedFiles,
+        fileSizes: result.fileSizes,
         previousInstall:
           result.previousInstall ?? prior?.previousInstall,
       };

@@ -58,6 +58,7 @@ export interface InstalledBundleState {
   version: string;
   installedAt: string;
   files: string[];
+  fileSizes?: Record<string, number>;
   previousInstall?: PreviousInstall;
 }
 
