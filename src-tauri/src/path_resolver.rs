@@ -231,10 +231,10 @@ fn premiere_paths_for_version(version: &DetectedVersion, user: &str) -> Vec<Path
         out.push(check_path("Technical LUTs (.cube, .3dl)", &technical));
     }
 
-    if let Some(common) = docs_adobe_common {
+    if let Ok(appdata) = appdata_roaming() {
         out.push(check_path(
             "MOGRTs (.mogrt)",
-            &common.join("Motion Graphics Templates"),
+            &appdata.join("Adobe").join("Common").join("Motion Graphics Templates"),
         ));
     }
 
@@ -323,31 +323,31 @@ fn detect_resolve(folder_label: &str) -> AppDetection {
                 "Fusion templates (.setting)",
                 &support.join("Fusion").join("Templates"),
             ));
-            paths.push(check_path(
-                "Fairlight presets (.preset)",
-                &support.join("Fairlight").join("Presets"),
-            ));
+            if let Ok(fp) = resolve_fairlight_presets_path() {
+                paths.push(check_path("Fairlight presets (.preset)", &fp));
+            }
         }
     } else {
         let ad = appdata_roaming().ok();
         if let Some(ad) = ad {
             let bmd = ad.join("Blackmagic Design").join("DaVinci Resolve");
             installed_signal |= bmd.exists();
-            paths.push(check_path(
-                "Resolve LUTs (.cube, .3dl) — root LUT folder",
-                &ad
-                    .join("Blackmagic Design")
-                    .join("DaVinci Resolve")
-                    .join("LUT"),
-            ));
+            // LUTs live in system /Library, not ~/Library, on macOS.
+            if let Ok(pd) = programdata_dir() {
+                paths.push(check_path(
+                    "Resolve LUTs (.cube, .3dl) — root LUT folder",
+                    &pd.join("Blackmagic Design")
+                        .join("DaVinci Resolve")
+                        .join("LUT"),
+                ));
+            }
             paths.push(check_path(
                 "Fusion templates (.setting)",
                 &bmd.join("Fusion").join("Templates"),
             ));
-            paths.push(check_path(
-                "Fairlight presets (.preset)",
-                &bmd.join("Fairlight").join("Presets"),
-            ));
+            if let Ok(fp) = resolve_fairlight_presets_path() {
+                paths.push(check_path("Fairlight presets (.preset)", &fp));
+            }
         }
     }
 
@@ -600,7 +600,8 @@ pub fn resolve_install_path(
             adobe_common_lut_path("Technical")?.to_string_lossy().to_string(),
         )),
         ("premiere", "mogrt") => Ok(auto(
-            documents_dir()?
+            // AppData\Roaming (Win) / ~/Library/Application Support (Mac) — NOT Documents.
+            appdata_roaming()?
                 .join("Adobe")
                 .join("Common")
                 .join("Motion Graphics Templates")
@@ -637,11 +638,7 @@ pub fn resolve_install_path(
                 .to_string(),
         )),
         ("resolve", "fairlight") => Ok(auto(
-            resolve_support_dir()?
-                .join("Fairlight")
-                .join("Presets")
-                .to_string_lossy()
-                .to_string(),
+            resolve_fairlight_presets_path()?.to_string_lossy().to_string(),
         )),
         ("resolve", "powergrade") => Ok(manual(manual_resolve_dir(folder_label, "PowerGrades")?)),
         ("resolve", "timeline") => Ok(manual(manual_resolve_dir(folder_label, "Timelines")?)),
@@ -721,49 +718,30 @@ fn ame_presets_path() -> Result<PathBuf, PathError> {
 }
 
 fn adobe_common_lut_path(kind: &str) -> Result<PathBuf, PathError> {
-    // Use the per-user Adobe Common folder so installs don't need admin rights.
-    // Premiere scans this in addition to the system-wide Program Files path.
-    if cfg!(target_os = "windows") {
-        Ok(documents_dir()?
-            .join("Adobe")
-            .join("Common")
-            .join("LUTs")
-            .join(kind))
-    } else {
-        Ok(home_dir()?
-            .join("Library")
-            .join("Application Support")
-            .join("Adobe")
-            .join("Common")
-            .join("LUTs")
-            .join(kind))
-    }
+    // Both platforms: AppData\Roaming (Win) / ~/Library/Application Support (Mac).
+    // NOT Documents — Adobe's LUT scanner reads AppData/Roaming, not Documents.
+    Ok(appdata_roaming()?
+        .join("Adobe")
+        .join("Common")
+        .join("LUTs")
+        .join(kind))
 }
 
 fn adobe_common_text_styles_path() -> Result<PathBuf, PathError> {
-    // Caption Track Style files (.prtextstyle) live under Adobe Common, shared
-    // across all Premiere versions. No per-version Profile-<user> folder.
-    if cfg!(target_os = "windows") {
-        Ok(documents_dir()?
-            .join("Adobe")
-            .join("Common")
-            .join("Assets")
-            .join("Text Styles"))
-    } else {
-        Ok(home_dir()?
-            .join("Library")
-            .join("Application Support")
-            .join("Adobe")
-            .join("Common")
-            .join("Assets")
-            .join("Text Styles"))
-    }
+    // Caption Track Style files (.prtextstyle) — both platforms store under
+    // Documents/Adobe/Common/Assets/Text Styles (not Library/AppData).
+    Ok(documents_dir()?
+        .join("Adobe")
+        .join("Common")
+        .join("Assets")
+        .join("Text Styles"))
 }
 
 fn resolve_lut_path() -> Result<PathBuf, PathError> {
     // Install to the root LUT folder — no <label> subfolder — so team LUTs
     // appear alongside the user's personal LUTs in Resolve's browser rather
     // than in a separate named group.
+    // On macOS Resolve stores LUTs in the system /Library, not ~/Library.
     if cfg!(target_os = "windows") {
         Ok(programdata_dir()?
             .join("Blackmagic Design")
@@ -771,12 +749,31 @@ fn resolve_lut_path() -> Result<PathBuf, PathError> {
             .join("Support")
             .join("LUT"))
     } else {
-        Ok(home_dir()?
-            .join("Library")
-            .join("Application Support")
+        Ok(programdata_dir()?
             .join("Blackmagic Design")
             .join("DaVinci Resolve")
             .join("LUT"))
+    }
+}
+
+fn resolve_fairlight_presets_path() -> Result<PathBuf, PathError> {
+    // Fairlight presets live under "Preferences", not "Support".
+    // On macOS the base is ~/Library/Preferences, not Application Support.
+    if cfg!(target_os = "windows") {
+        Ok(appdata_roaming()?
+            .join("Blackmagic Design")
+            .join("DaVinci Resolve")
+            .join("Preferences")
+            .join("Fairlight")
+            .join("Presets"))
+    } else {
+        Ok(home_dir()?
+            .join("Library")
+            .join("Preferences")
+            .join("Blackmagic Design")
+            .join("DaVinci Resolve")
+            .join("Fairlight")
+            .join("Presets"))
     }
 }
 
