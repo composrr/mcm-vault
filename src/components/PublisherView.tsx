@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconAlertTriangle,
-  IconArrowBackUp,
   IconArrowLeft,
   IconCheck,
   IconChevronRight,
   IconCloudUpload,
-  IconExternalLink,
   IconFile,
   IconFolder,
   IconFolderOpen,
@@ -21,7 +19,6 @@ import {
   publisherDefaultSource,
   resolveTarget,
   revealPath,
-  revertLastPublish,
   scanPublishDiffs,
   type BundleDiff,
   type PublishPlan,
@@ -109,9 +106,7 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
   const [scanning, setScanning] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishMessage, setPublishMessage] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [reverting, setReverting] = useState(false);
   const [selectedBundleId, setSelectedBundleId] = useState<string>("");
 
   const [publishModalOpen, setPublishModalOpen] = useState(false);
@@ -296,30 +291,10 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
         };
       });
 
-  const revert = async () => {
-    const lp = persisted.lastPublish;
-    if (!lp) return;
-    setReverting(true);
-    setPublishError(null);
-    setPublishMessage(null);
-    try {
-      const newSha = await revertLastPublish(lp.sha);
-      await setPersisted({ lastPublish: null });
-      setPublishMessage(`Reverted ${lp.summary}.${newSha ? ` Revert commit ${newSha.slice(0, 7)}.` : ""}`);
-      try { await useAppStore.getState().refreshManifest(); } catch {}
-      await scan();
-    } catch (e) {
-      setPublishError(formatError(e));
-    } finally {
-      setReverting(false);
-    }
-  };
-
   const publish = async () => {
     setShowConfirm(false);
     setPublishing(true);
     setPublishError(null);
-    setPublishMessage(null);
     try {
       const plans: PublishPlan[] = bundles
         .filter((b) => bundleHasChanges(b.id))
@@ -333,7 +308,7 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
             presetType: b.presetType,
           };
         });
-      if (plans.length === 0) { setPublishMessage("Nothing to publish."); return; }
+      if (plans.length === 0) return;
 
       // Open progress modal and set up event listener before calling publish
       const ids = plans.map((p) => p.bundleId);
@@ -377,7 +352,6 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
           ? { sha: result.commitSha, summary: summaryText, publishedAt: nowIso }
           : persisted.lastPublish,
       });
-      setPublishMessage(`Published ${result.published.length} ${result.published.length === 1 ? "bundle" : "bundles"}.${result.commitSha ? ` Commit ${result.commitSha.slice(0, 7)}.` : ""}`);
       try { await useAppStore.getState().refreshManifest(); } catch {}
       await scan();
     } catch (e) {
@@ -585,23 +559,10 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
             {publishError}
           </div>
         )}
-        {publishMessage && (
-          <div className="mb-2 rounded-md border border-mcm-blue/30 bg-mcm-blue-tint px-3 py-2 text-[12px] text-mcm-blue">
-            {publishMessage}{" "}
-            <a
-              href="https://github.com/composrr/mcm-vault-presets"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-0.5 underline"
-            >
-              View repo <IconExternalLink size={12} stroke={2} />
-            </a>
-          </div>
-        )}
         <button
           type="button"
           onClick={() => setShowConfirm(true)}
-          disabled={publishing || reverting || totalChangedBundles === 0}
+          disabled={publishing || totalChangedBundles === 0}
           className="flex w-full items-center justify-center gap-1.5 rounded-md bg-mcm-blue px-4 py-2 text-[13px] font-medium text-white hover:bg-mcm-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {publishing ? (
@@ -615,22 +576,6 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
               ? "No changes to publish"
               : `Publish ${totalChangedBundles} changed ${totalChangedBundles === 1 ? "bundle" : "bundles"}`}
         </button>
-        {persisted.lastPublish && (
-          <button
-            type="button"
-            onClick={() => void revert()}
-            disabled={publishing || reverting}
-            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-4 py-2 text-[12px] text-body hover:bg-border-soft disabled:opacity-50"
-            title={`Undo: ${persisted.lastPublish.summary}`}
-          >
-            {reverting ? (
-              <IconLoader2 size={14} stroke={2} className="animate-spin" />
-            ) : (
-              <IconArrowBackUp size={14} stroke={2} />
-            )}
-            {reverting ? "Reverting…" : `Revert last publish (${persisted.lastPublish.summary})`}
-          </button>
-        )}
       </div>
 
       {showConfirm && (
