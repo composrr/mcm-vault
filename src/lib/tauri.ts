@@ -234,6 +234,8 @@ export interface PublishPlan {
   /** Bundle's preset_type — backend uses it to apply repo-layout transforms
    *  (e.g. keyboard files get a `win/` or `mac/` prefix in the manifest). */
   presetType: string;
+  explicitlyExcluded: string[];
+  priorLocalNames: string[];
 }
 
 export interface PublishedBundle {

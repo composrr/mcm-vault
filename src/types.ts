@@ -88,6 +88,7 @@ export interface PublisherBundleState {
   lastPublishedAt: string | null;
   lastPublishedVersion: string | null;
   includedFiles: string[];
+  excludedRemoteFiles?: string[];  // repo-space names user wants removed from manifest
 }
 
 export interface LastPublish {

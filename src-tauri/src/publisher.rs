@@ -136,7 +136,7 @@ fn diff_for_bundle(
         match baseline.get(&f.name) {
             None => added.push(f.name.clone()),
             Some(prev) => {
-                if prev.size != f.size || prev.mtime_ms != f.mtime_ms {
+                if prev.size != f.size {
                     modified.push(f.name.clone());
                 }
             }
@@ -266,6 +266,13 @@ pub struct PublishPlan {
     /// when written into the repo + manifest).
     #[serde(default)]
     pub preset_type: String,
+    /// Repo-space file names the user has explicitly marked to remove from the manifest.
+    #[serde(default)]
+    pub explicitly_excluded: Vec<String>,
+    /// Local file names this machine published last time (keys from lastPublishedFiles).
+    /// Used to auto-clean renamed/deleted files from the manifest.
+    #[serde(default)]
+    pub prior_local_names: Vec<String>,
 }
 
 /// Translate a flat local file name into the path/key the manifest + repo use.
@@ -446,9 +453,24 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
         // Cross-machine semantics:
         //   preserved = manifest files NOT locally present (other machines own them)
         //   new files = preserved + included (in repo-space)
+
+        // Repo-space names this machine previously published (for auto-cleanup of renames/deletes)
+        let prior_repo_names: std::collections::HashSet<String> = plan.prior_local_names
+            .iter()
+            .map(|n| repo_name_for(preset_type, n))
+            .collect();
+
+        // Preserve manifest files that:
+        //   - don't exist locally (another machine owns them)
+        //   - aren't explicitly excluded by the user
+        //   - weren't previously published by THIS machine (auto-clean renames/deletes)
         let mut new_bundle_files: Vec<String> = current_manifest_files
             .iter()
-            .filter(|name| !local_repo_names.contains(*name))
+            .filter(|name| {
+                !local_repo_names.contains(*name)
+                    && !plan.explicitly_excluded.contains(*name)
+                    && !prior_repo_names.contains(*name)
+            })
             .cloned()
             .collect();
         for name in &plan.included_file_names {

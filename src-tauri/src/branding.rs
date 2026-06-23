@@ -22,8 +22,16 @@ pub fn manifest_url() -> String {
 }
 
 pub fn bundle_file_url(bundle_path: &str, file_name: &str) -> String {
-    format!(
-        "https://raw.githubusercontent.com/{}/{}/{}/{}/{}",
-        REPO_OWNER, REPO_NAME, REPO_BRANCH, bundle_path, file_name
-    )
+    let base = format!(
+        "https://raw.githubusercontent.com/{}/{}/{}/{}",
+        REPO_OWNER, REPO_NAME, REPO_BRANCH, bundle_path
+    );
+    // Percent-encode each byte of the file name so spaces and special chars work
+    let encoded: String = file_name.bytes().flat_map(|b| match b {
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+            vec![b as char]
+        }
+        b => format!("%{b:02X}").chars().collect::<Vec<_>>(),
+    }).collect();
+    format!("{base}/{encoded}")
 }
