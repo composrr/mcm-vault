@@ -247,6 +247,7 @@ export interface PublishedBundle {
   newVersion: string;
   fileSignatures: Record<string, PublisherFile>;
   publishedAt: string;
+  files: string[];
 }
 
 export interface PublishResult {

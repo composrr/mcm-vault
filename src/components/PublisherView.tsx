@@ -358,6 +358,17 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
           ? { sha: result.commitSha, summary: summaryText, publishedAt: nowIso }
           : persisted.lastPublish,
       });
+      // Patch the in-memory manifest immediately so the publisher UI reflects
+      // the new file list without waiting for GitHub CDN cache to expire.
+      const currentManifest = useAppStore.getState().manifest;
+      if (currentManifest) {
+        const patchedBundles = currentManifest.bundles.map((b) => {
+          const pub = result.published.find((p) => p.bundleId === b.id);
+          if (!pub) return b;
+          return { ...b, version: pub.newVersion, files: pub.files };
+        });
+        useAppStore.setState({ manifest: { ...currentManifest, bundles: patchedBundles } });
+      }
       try { await useAppStore.getState().refreshManifest(); } catch {}
       await scan();
     } catch (e) {

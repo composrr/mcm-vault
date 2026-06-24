@@ -345,6 +345,7 @@ pub struct PublishedBundle {
     pub new_version: String,
     pub file_signatures: BTreeMap<String, state::PublisherFile>,
     pub published_at: String,
+    pub files: Vec<String>,
 }
 
 #[tauri::command]
@@ -589,6 +590,7 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
             new_version,
             file_signatures: signatures,
             published_at: chrono::Utc::now().to_rfc3339(),
+            files: new_bundle_files.clone(),
         });
     }
 
