@@ -49,6 +49,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'MCM Vault ${{ github.ref_name }}'
@@ -57,7 +63,7 @@ jobs:
 
             **First install:**
             - Windows: download the `.msi` (or `-setup.exe`). Click "More info" → "Run anyway" if Windows SmartScreen warns.
-            - macOS (Apple Silicon): download `aarch64.dmg`. Drag MCM Vault to Applications. First launch: right-click the app → Open → confirm. (Gatekeeper warning, normal for unsigned apps.)
+            - macOS (Apple Silicon): download `aarch64.dmg`. Drag MCM Vault to Applications.
             - macOS (Intel): same flow with `x64.dmg`.
 
             **Subsequent updates:** open the app → Settings → "Check for app updates". The app downloads, installs, and restarts itself.
