@@ -346,6 +346,7 @@ pub struct PublishedBundle {
     pub file_signatures: BTreeMap<String, state::PublisherFile>,
     pub published_at: String,
     pub files: Vec<String>,
+    pub file_dates: std::collections::HashMap<String, String>,
 }
 
 #[tauri::command]
@@ -418,6 +419,17 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
             .map(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Existing per-file dates — preserved files keep their original date.
+        let mut file_dates: std::collections::HashMap<String, String> = bundle_value
+            .get("fileDates")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
                     .collect()
             })
             .unwrap_or_default();
@@ -564,14 +576,38 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
             .collect();
         new_bundle_files.sort();
 
-        // Update manifest entry: version, files.
+        // Record publish date for each file: newly published files get today,
+        // preserved files keep their existing date.
+        let now_iso = chrono::Utc::now().to_rfc3339();
+        for f in &local_scan {
+            if !included_set.contains(&f.name) {
+                continue;
+            }
+            let repo_rel = repo_name_for(preset_type, &f.name);
+            // Use actual on-disk casing if available.
+            let key = actual_path_map
+                .get(&repo_rel.to_lowercase())
+                .cloned()
+                .unwrap_or(repo_rel);
+            file_dates.insert(key, now_iso.clone());
+        }
+        // Drop dates for files no longer in the bundle.
+        let new_files_set: std::collections::HashSet<String> = new_bundle_files.iter().cloned().collect();
+        file_dates.retain(|k, _| new_files_set.contains(k));
+
+        // Update manifest entry: version, files, fileDates.
         let bundle_obj = bundle_value
             .as_object_mut()
             .ok_or_else(|| PublisherError::Manifest {
                 message: "bundle entry not an object".into(),
             })?;
         bundle_obj.insert("version".into(), serde_json::Value::String(new_version.clone()));
-        bundle_obj.insert("updatedAt".into(), serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+        bundle_obj.insert("updatedAt".into(), serde_json::Value::String(now_iso.clone()));
+        let file_dates_json: serde_json::Map<String, serde_json::Value> = file_dates
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect();
+        bundle_obj.insert("fileDates".into(), serde_json::Value::Object(file_dates_json));
         bundle_obj.insert(
             "files".into(),
             serde_json::Value::Array(
@@ -592,6 +628,7 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
             file_signatures: signatures,
             published_at: chrono::Utc::now().to_rfc3339(),
             files: new_bundle_files.clone(),
+            file_dates: file_dates.clone(),
         });
     }
 

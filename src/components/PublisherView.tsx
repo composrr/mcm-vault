@@ -365,7 +365,7 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
         const patchedBundles = currentManifest.bundles.map((b) => {
           const pub = result.published.find((p) => p.bundleId === b.id);
           if (!pub) return b;
-          return { ...b, version: pub.newVersion, files: pub.files, updatedAt: pub.publishedAt };
+          return { ...b, version: pub.newVersion, files: pub.files, updatedAt: pub.publishedAt, fileDates: pub.fileDates };
         });
         useAppStore.setState({ manifest: { ...currentManifest, bundles: patchedBundles } });
       }

@@ -248,6 +248,7 @@ export interface PublishedBundle {
   fileSignatures: Record<string, PublisherFile>;
   publishedAt: string;
   files: string[];
+  fileDates: Record<string, string>;
 }
 
 export interface PublishResult {

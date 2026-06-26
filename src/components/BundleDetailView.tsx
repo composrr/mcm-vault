@@ -200,14 +200,7 @@ export function BundleDetailView({
         )}
 
         <section className="px-5 pb-3">
-          <div className="mb-2 flex items-baseline justify-between">
-            <div className="text-[11px] tracking-wide text-muted">FILES ({allFiles.length})</div>
-            {bundle.updatedAt && (
-              <div className="text-[11px] text-muted">
-                Published {formatDate(bundle.updatedAt)}
-              </div>
-            )}
-          </div>
+          <div className="mb-2 text-[11px] tracking-wide text-muted">FILES ({allFiles.length})</div>
           <div className="overflow-hidden rounded-lg border border-border bg-surface">
             {visibleFiles.map((file) => (
               <div
@@ -216,6 +209,11 @@ export function BundleDetailView({
               >
                 <IconFile size={14} stroke={2} className="shrink-0 text-muted" />
                 <span className="flex-1 truncate text-[12px] text-ink">{file}</span>
+                {bundle.fileDates?.[file] && (
+                  <span className="shrink-0 text-[11px] text-muted tabular-nums">
+                    {formatDate(bundle.fileDates[file])}
+                  </span>
+                )}
               </div>
             ))}
             {hasMore && (
