@@ -112,8 +112,13 @@ export function BundleRow({ row, onClick, onToggleDisabled }: BundleRowProps) {
           </div>
         </div>
         {status !== "error" && (
-          <div className={`text-[11px] tabular-nums ${versionClass}`}>
-            v{bundle.version}
+          <div className={`text-right tabular-nums ${versionClass}`}>
+            <div className="text-[11px]">v{bundle.version}</div>
+            {bundle.updatedAt && (
+              <div className="text-[10px] text-muted font-normal">
+                {new Date(bundle.updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+              </div>
+            )}
           </div>
         )}
       </div>

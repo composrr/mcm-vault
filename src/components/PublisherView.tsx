@@ -365,7 +365,7 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
         const patchedBundles = currentManifest.bundles.map((b) => {
           const pub = result.published.find((p) => p.bundleId === b.id);
           if (!pub) return b;
-          return { ...b, version: pub.newVersion, files: pub.files };
+          return { ...b, version: pub.newVersion, files: pub.files, updatedAt: pub.publishedAt };
         });
         useAppStore.setState({ manifest: { ...currentManifest, bundles: patchedBundles } });
       }
@@ -700,10 +700,10 @@ function PublishConfirmDialog({ summaries, onCancel, onConfirm }: PublishConfirm
 interface FileTreeDir {
   name: string;
   dirs: FileTreeDir[];
-  files: Array<{ name: string; size: number }>;
+  files: Array<{ name: string; size: number; mtimeMs?: number }>;
 }
 
-function buildFileTree(files: Array<{ name: string; size: number }>): FileTreeDir {
+function buildFileTree(files: Array<{ name: string; size: number; mtimeMs?: number }>): FileTreeDir {
   const root: FileTreeDir = { name: "", dirs: [], files: [] };
   for (const f of files) {
     const parts = f.name.split("/");
@@ -754,7 +754,7 @@ function IndeterminateCheckbox({ checked, indeterminate, onChange }: { checked: 
 // ─── File row ─────────────────────────────────────────────────────────────
 
 interface FileRowItemProps {
-  f: { name: string; size: number };
+  f: { name: string; size: number; mtimeMs?: number };
   displayName: string;
   depth: number;
   selected: Set<string>;
@@ -785,7 +785,13 @@ function FileRowItem({ f, displayName, depth, selected, manifestSet, modifiedNam
         <span className="shrink-0 rounded bg-border-soft px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-muted">{ext}</span>
       )}
       <span className="flex-1 truncate font-medium text-ink">{displayName}</span>
-      <span className="shrink-0 tabular-nums text-[10.5px] text-muted">{formatBytes(f.size)}</span>
+      {f.mtimeMs ? (
+        <span className="shrink-0 tabular-nums text-[10px] text-muted">
+          {new Date(f.mtimeMs).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+        </span>
+      ) : (
+        <span className="shrink-0 tabular-nums text-[10.5px] text-muted">{formatBytes(f.size)}</span>
+      )}
       <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusClass}`}>{statusLabel}</span>
     </label>
   );

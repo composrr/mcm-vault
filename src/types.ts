@@ -26,6 +26,7 @@ export interface Bundle {
   name: string;
   description: string;
   version: string;
+  updatedAt?: string;
   category: Category;
   installType: InstallType;
   presetType: PresetType;

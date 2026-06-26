@@ -571,6 +571,7 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
                 message: "bundle entry not an object".into(),
             })?;
         bundle_obj.insert("version".into(), serde_json::Value::String(new_version.clone()));
+        bundle_obj.insert("updatedAt".into(), serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
         bundle_obj.insert(
             "files".into(),
             serde_json::Value::Array(

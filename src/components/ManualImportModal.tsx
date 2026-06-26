@@ -57,6 +57,14 @@ export function ManualImportModal({
     ? [{ step: bundle.importInstructions }]
     : RESOLVE_INSTRUCTIONS;
 
+  const isResolveBundle = bundle.category === "resolve";
+  const modalTitle = isResolveBundle ? "Import in DaVinci Resolve" : `Import in ${bundle.name.includes("Premiere") ? "Premiere Pro" : bundle.name.includes("Audition") ? "Audition" : "Your App"}`;
+  const introText = isResolveBundle
+    ? "PowerGrades and similar Resolve files live inside Resolve's database, so they need to be imported manually. The files are already synced to your computer — just follow these steps inside Resolve."
+    : bundle.importInstructions
+      ? "These files are already synced to your computer — just follow the steps below to use them."
+      : null;
+
   // What's new since the user last confirmed an import. If they've never
   // imported, every file is new. If they imported an older version, show the
   // files added since — and flag that same-named files may have changed.
@@ -82,7 +90,7 @@ export function ManualImportModal({
           </div>
           <div className="flex-1">
             <div className="text-[16px] font-semibold text-ink">
-              Import in DaVinci Resolve
+              {modalTitle}
             </div>
             <div className="mt-0.5 text-[12px] text-body">
               {bundle.name} · v{bundle.version}
@@ -114,12 +122,11 @@ export function ManualImportModal({
             </div>
           ) : (
             <>
-              <p className="mb-4 text-[13px] leading-relaxed text-body">
-                PowerGrades and similar Resolve files live inside Resolve's
-                database, so they need to be imported manually. The files are
-                already synced to your computer — just follow these steps inside
-                Resolve.
-              </p>
+              {introText && (
+                <p className="mb-4 text-[13px] leading-relaxed text-body">
+                  {introText}
+                </p>
+              )}
 
               {/* What's new since last import */}
               <div className="mb-4 rounded-lg border border-mcm-blue/30 bg-mcm-blue-tint px-3.5 py-3">

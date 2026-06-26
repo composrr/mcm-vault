@@ -7,7 +7,7 @@ interface AppHeaderProps {
 
 export function AppHeader({ onOpenSettings }: AppHeaderProps) {
   return (
-    <header className="flex items-center gap-3 border-b border-border bg-surface px-5 py-4">
+    <header data-tauri-drag-region className="flex items-center gap-3 border-b border-border bg-surface px-5 py-4">
       <BrandMark className="shrink-0" />
       <div className="flex-1">
         <div className="text-[16px] font-semibold leading-tight text-ink">MCM Vault</div>
