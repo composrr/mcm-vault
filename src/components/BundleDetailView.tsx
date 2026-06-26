@@ -200,8 +200,13 @@ export function BundleDetailView({
         )}
 
         <section className="px-5 pb-3">
-          <div className="mb-2 text-[11px] tracking-wide text-muted">
-            FILES ({allFiles.length})
+          <div className="mb-2 flex items-baseline justify-between">
+            <div className="text-[11px] tracking-wide text-muted">FILES ({allFiles.length})</div>
+            {bundle.updatedAt && (
+              <div className="text-[11px] text-muted">
+                Published {formatDate(bundle.updatedAt)}
+              </div>
+            )}
           </div>
           <div className="overflow-hidden rounded-lg border border-border bg-surface">
             {visibleFiles.map((file) => (
@@ -292,16 +297,14 @@ export function BundleDetailView({
             <IconRefresh size={16} stroke={2} />
             {installed ? "Reinstall" : "Install"}
           </button>
-          {installed && (
-            <button
-              type="button"
-              onClick={onReveal}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft"
-            >
-              <IconFolder size={16} stroke={2} />
-              Reveal files
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onReveal}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft"
+          >
+            <IconFolder size={16} stroke={2} />
+            Open folder
+          </button>
           {installed && (
             <button
               type="button"
