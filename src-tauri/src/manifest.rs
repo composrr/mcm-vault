@@ -16,6 +16,10 @@ pub struct Bundle {
     pub files: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_dates: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
