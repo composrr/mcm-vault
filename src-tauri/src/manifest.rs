@@ -20,6 +20,19 @@ pub struct Bundle {
     pub updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_dates: Option<std::collections::HashMap<String, String>>,
+    // Custom (user-created) bundles carry their own cross-platform target: an
+    // `anchor` token (documents/desktop/home/appSupport) plus a relative
+    // `subpath`. The app expands the anchor per-machine so files land in the
+    // right place regardless of OS or username. `section_label` is the display
+    // name of the custom section this bundle belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

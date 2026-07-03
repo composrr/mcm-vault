@@ -8,12 +8,14 @@ import {
   IconFile,
   IconFolder,
   IconFolderOpen,
+  IconFolderPlus,
   IconLoader2,
   IconRefresh,
   IconX,
 } from "@tabler/icons-react";
 import type { Bundle, PublisherBundleState } from "../types";
 import {
+  createCustomBundle,
   listenPublishProgress,
   publishBundles,
   publisherDefaultSource,
@@ -24,6 +26,7 @@ import {
   type PublishPlan,
 } from "../lib/tauri";
 import { PublishProgressModal } from "./PublishProgressModal";
+import { CreateBundleModal, type NewBundleValues } from "./CreateBundleModal";
 import { useAppStore } from "../store/useAppStore";
 
 function bumpPatch(v: string): string {
@@ -116,6 +119,8 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
   const [publishPlanIds, setPublishPlanIds] = useState<string[]>([]);
   const [publishPlanNames, setPublishPlanNames] = useState<Record<string, string>>({});
   const publishUnlistenRef = useRef<(() => void) | null>(null);
+
+  const [showCreate, setShowCreate] = useState(false);
 
   const publisherEntries = persisted.publisher;
 
@@ -392,12 +397,52 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
 
   const categories = useMemo(() => {
     const groups: { key: string; label: string; bundles: Bundle[] }[] = [];
+    const seen = new Set<string>();
+    // Built-in sections first, in fixed order.
     for (const cat of ["premiere", "resolve"]) {
       const group = bundles.filter((b) => b.category === cat);
-      if (group.length > 0) groups.push({ key: cat, label: CATEGORY_LABEL[cat] ?? cat, bundles: group });
+      if (group.length > 0) {
+        groups.push({ key: cat, label: CATEGORY_LABEL[cat] ?? cat, bundles: group });
+        seen.add(cat);
+      }
+    }
+    // Custom sections, in first-seen order, labeled by their sectionLabel.
+    for (const b of bundles) {
+      if (seen.has(b.category)) continue;
+      seen.add(b.category);
+      const group = bundles.filter((x) => x.category === b.category);
+      const label =
+        group.find((x) => x.sectionLabel)?.sectionLabel ??
+        CATEGORY_LABEL[b.category] ??
+        b.category;
+      groups.push({ key: b.category, label, bundles: group });
     }
     return groups;
   }, [bundles]);
+
+  // Distinct custom-section labels, for the "reuse existing section" picker.
+  const customSectionLabels = useMemo(() => {
+    const out: string[] = [];
+    for (const b of bundles) {
+      if (b.custom && b.sectionLabel && !out.includes(b.sectionLabel)) {
+        out.push(b.sectionLabel);
+      }
+    }
+    return out;
+  }, [bundles]);
+
+  const handleCreateBundle = async (values: NewBundleValues) => {
+    const newId = await createCustomBundle(values);
+    // Pull the updated manifest so the new bundle shows up, then rescan.
+    try {
+      await useAppStore.getState().refreshManifest();
+    } catch {
+      /* non-fatal — scan below still reflects local state */
+    }
+    await scan();
+    setShowCreate(false);
+    setSelectedBundleId(newId);
+  };
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -432,6 +477,14 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
                 {totalChangedBundles} changed
               </span>
             )}
+            <button
+              type="button"
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-1 rounded-md border border-border-strong bg-white px-2 py-1 text-[12px] text-ink hover:bg-border-soft"
+            >
+              <IconFolderPlus size={14} stroke={2} />
+              Add
+            </button>
             <button
               type="button"
               onClick={() => void scan()}
@@ -613,6 +666,14 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
           done={publishModalDone}
           error={publishError}
           onDismiss={handlePublishModalDismiss}
+        />
+      )}
+
+      {showCreate && (
+        <CreateBundleModal
+          existingSections={customSectionLabels}
+          onClose={() => setShowCreate(false)}
+          onCreate={handleCreateBundle}
         />
       )}
     </div>
@@ -968,12 +1029,12 @@ function BundlePanel({ bundle, folderLabel, status, entry, selected, dirty, onTo
       {status?.diff && !status.diff.sourceExists ? (
         <div className="rounded-md border border-warning-border bg-warning-bg px-4 py-3 text-[12px] text-warning-text">
           <div className="mb-0.5 font-medium">Source folder doesn't exist yet</div>
-          <div className="text-[11px]">Click <span className="font-medium">Open folder</span> above to create it, then save a preset in {bundle.category === "premiere" ? "Premiere" : "Resolve"}.</div>
+          <div className="text-[11px]">Click <span className="font-medium">Open folder</span> above to create it, then {bundle.custom ? "add your files there" : `save a preset in ${bundle.category === "premiere" ? "Premiere" : "Resolve"}`}.</div>
         </div>
       ) : localFiles.length === 0 ? (
         <div className="rounded-md border border-dashed border-border bg-surface px-4 py-4 text-center">
           <div className="text-[12px] text-body">No files yet</div>
-          <div className="mt-0.5 text-[10.5px] text-muted">Save a preset in {bundle.category === "premiere" ? "Premiere" : "Resolve"} to the source folder, then click <span className="font-medium">Rescan</span>.</div>
+          <div className="mt-0.5 text-[10.5px] text-muted">{bundle.custom ? "Add files to" : `Save a preset in ${bundle.category === "premiere" ? "Premiere" : "Resolve"} to`} the source folder, then click <span className="font-medium">Rescan</span>.</div>
         </div>
       ) : (
         <div className="overflow-hidden rounded-md border border-border bg-white">

@@ -753,6 +753,16 @@ pub fn publisher_default_source(
     folder_label: String,
 ) -> Result<String, PublisherError> {
     use crate::path_resolver;
+    // Custom bundle: source == install target == resolved anchor + subpath.
+    if bundle.custom == Some(true) {
+        let anchor = bundle.anchor.as_deref().unwrap_or("documents");
+        let subpath = bundle.subpath.as_deref().unwrap_or("");
+        let resolved = path_resolver::resolve_custom_target(anchor, subpath)
+            .map_err(|e| PublisherError::Path {
+                message: e.to_string(),
+            })?;
+        return Ok(resolved.path);
+    }
     let resolved = path_resolver::resolve_install_path(
         &bundle.category,
         &bundle.preset_type,
@@ -762,4 +772,146 @@ pub fn publisher_default_source(
         message: e.to_string(),
     })?;
     Ok(resolved.path)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCustomBundleInput {
+    pub name: String,
+    pub section_label: String,
+    pub anchor: String,
+    pub subpath: String,
+}
+
+fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() { "custom".into() } else { trimmed }
+}
+
+/// Create a new custom bundle: adds an entry to the shared manifest with its
+/// cross-platform anchor + subpath, creates a placeholder folder in the repo so
+/// git tracks the path, then commits and pushes. Returns the new bundle id.
+/// Files are added afterward through the normal publish flow.
+#[tauri::command]
+pub async fn create_custom_bundle(
+    input: CreateCustomBundleInput,
+) -> Result<String, PublisherError> {
+    let repo = ensure_repo_cloned().await?;
+    let manifest_path = repo.join("manifest.json");
+    let manifest_bytes = tokio::fs::read(&manifest_path)
+        .await
+        .map_err(|e| PublisherError::Io {
+            message: format!("read manifest: {e}"),
+        })?;
+    let mut manifest_value: serde_json::Value =
+        serde_json::from_slice(&manifest_bytes).map_err(|e| PublisherError::Manifest {
+            message: e.to_string(),
+        })?;
+
+    let bundles_array = manifest_value
+        .get_mut("bundles")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| PublisherError::Manifest {
+            message: "manifest.json has no bundles array".into(),
+        })?;
+
+    // Generate a unique id from the name.
+    let base_id = slugify(&input.name);
+    let mut id = base_id.clone();
+    let mut n = 2;
+    while bundles_array
+        .iter()
+        .any(|b| b.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
+    {
+        id = format!("{base_id}-{n}");
+        n += 1;
+    }
+
+    let category = slugify(&input.section_label);
+    let repo_path = format!("custom/{id}");
+    let now_iso = chrono::Utc::now().to_rfc3339();
+
+    let bundle = serde_json::json!({
+        "id": id,
+        "name": input.name,
+        "description": "",
+        "version": "1.0",
+        "category": category,
+        "installType": "auto",
+        "presetType": "custom",
+        "path": repo_path,
+        "files": [],
+        "custom": true,
+        "sectionLabel": input.section_label,
+        "anchor": input.anchor,
+        "subpath": input.subpath,
+        "updatedAt": now_iso,
+    });
+    bundles_array.push(bundle);
+
+    if let Some(obj) = manifest_value.as_object_mut() {
+        obj.insert("updatedAt".into(), serde_json::Value::String(now_iso));
+    }
+
+    // Validate the result still parses as our Manifest type before writing.
+    let _: manifest::Manifest =
+        serde_json::from_value(manifest_value.clone()).map_err(|e| PublisherError::Manifest {
+            message: format!("manifest validation failed: {e}"),
+        })?;
+
+    // Create the placeholder folder so git tracks the repo path.
+    let target_dir = repo.join(&repo_path);
+    tokio::fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| PublisherError::Io {
+            message: e.to_string(),
+        })?;
+    let placeholder = target_dir.join("_PLACEHOLDER.md");
+    tokio::fs::write(&placeholder, b"This folder holds files for a custom MCM Vault bundle.\n")
+        .await
+        .map_err(|e| PublisherError::Io {
+            message: e.to_string(),
+        })?;
+
+    let bytes =
+        serde_json::to_vec_pretty(&manifest_value).map_err(|e| PublisherError::Manifest {
+            message: e.to_string(),
+        })?;
+    tokio::fs::write(&manifest_path, bytes)
+        .await
+        .map_err(|e| PublisherError::Io {
+            message: format!("write manifest: {e}"),
+        })?;
+
+    run_git(&repo, &["add", "-A"]).await?;
+    let commit_msg = format!("Create custom bundle: {}", input.name);
+    let commit_out = make_git_command(&["commit", "-m", &commit_msg], &repo)
+        .output()
+        .await
+        .map_err(|e| PublisherError::Git {
+            message: e.to_string(),
+        })?;
+    if !commit_out.status.success() {
+        let stderr = String::from_utf8_lossy(&commit_out.stderr).to_string();
+        if !stderr.contains("nothing to commit") {
+            return Err(PublisherError::Git {
+                message: format!("git commit failed: {stderr}"),
+            });
+        }
+    }
+    run_git(&repo, &["push", "origin", branding::REPO_BRANCH]).await?;
+
+    state::log_event("INFO", format!("create_custom_bundle id={id} section={}", input.section_label));
+    Ok(id)
 }

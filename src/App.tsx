@@ -328,7 +328,9 @@ function App() {
             void revealBundleFolder(
               selectedBundle.category,
               selectedBundle.presetType,
-              persisted.settings.folderLabel || "MCM Vault"
+              persisted.settings.folderLabel || "MCM Vault",
+              selectedBundle.anchor,
+              selectedBundle.subpath
             ).catch((e) => console.error("reveal_bundle_folder failed", e));
           }}
           onRestore={() => {

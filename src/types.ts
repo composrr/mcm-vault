@@ -1,4 +1,6 @@
-export type Category = "premiere" | "resolve";
+// Built-in categories are "premiere" | "resolve"; custom bundles use a
+// slug of their user-chosen section label, so this stays an open string.
+export type Category = "premiere" | "resolve" | (string & {});
 
 export type InstallType = "auto" | "manual";
 
@@ -19,7 +21,8 @@ export type PresetType =
   | "powergrade"
   | "timeline"
   | "project"
-  | "render";
+  | "render"
+  | "custom";
 
 export interface Bundle {
   id: string;
@@ -28,6 +31,11 @@ export interface Bundle {
   version: string;
   updatedAt?: string;
   fileDates?: Record<string, string>;
+  // Custom (user-created) bundle fields.
+  custom?: boolean;
+  sectionLabel?: string;
+  anchor?: string;
+  subpath?: string;
   category: Category;
   installType: InstallType;
   presetType: PresetType;

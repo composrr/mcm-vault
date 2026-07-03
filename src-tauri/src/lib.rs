@@ -53,6 +53,7 @@ pub fn run() {
             publisher::scan_publish_diffs,
             publisher::publish_bundles,
             publisher::publisher_default_source,
+            publisher::create_custom_bundle,
             publisher::revert_last_publish,
         ])
         .run(tauri::generate_context!())

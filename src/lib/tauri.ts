@@ -193,12 +193,16 @@ export async function checkPathsExist(paths: string[]): Promise<boolean[]> {
 export async function revealBundleFolder(
   category: string,
   presetType: string,
-  folderLabel: string
+  folderLabel: string,
+  anchor?: string,
+  subpath?: string
 ): Promise<string> {
   return invoke<string>("reveal_bundle_folder", {
     category,
     presetType,
     folderLabel,
+    anchor: anchor ?? null,
+    subpath: subpath ?? null,
   });
 }
 
@@ -268,6 +272,20 @@ export async function publisherDefaultSource(
   folderLabel: string
 ): Promise<string> {
   return invoke<string>("publisher_default_source", { bundle, folderLabel });
+}
+
+export interface CreateCustomBundleInput {
+  name: string;
+  sectionLabel: string;
+  anchor: string;
+  subpath: string;
+}
+
+/** Create a new custom bundle in the shared manifest. Returns the new bundle id. */
+export async function createCustomBundle(
+  input: CreateCustomBundleInput
+): Promise<string> {
+  return invoke<string>("create_custom_bundle", { input });
 }
 
 /** Revert a specific publish commit and push the revert. Returns the new

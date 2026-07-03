@@ -278,6 +278,11 @@ pub async fn install_bundle(
             path: custom.clone(),
             install_type: "auto".into(),
         }]
+    } else if bundle.custom == Some(true) {
+        // Custom bundle: resolve its anchor + subpath to this machine's path.
+        let anchor = bundle.anchor.as_deref().unwrap_or("documents");
+        let subpath = bundle.subpath.as_deref().unwrap_or("");
+        vec![path_resolver::resolve_custom_target(anchor, subpath)?]
     } else {
         path_resolver::resolve_install_paths(
             &bundle.category,
@@ -649,8 +654,16 @@ pub async fn reveal_bundle_folder(
     category: String,
     preset_type: String,
     folder_label: String,
+    anchor: Option<String>,
+    subpath: Option<String>,
 ) -> Result<String, InstallError> {
-    let target = path_resolver::resolve_install_path(&category, &preset_type, &folder_label)?;
+    // Custom bundles resolve via anchor + subpath rather than the built-in
+    // (category, preset_type) map.
+    let target = if let Some(anchor) = anchor {
+        path_resolver::resolve_custom_target(&anchor, subpath.as_deref().unwrap_or(""))?
+    } else {
+        path_resolver::resolve_install_path(&category, &preset_type, &folder_label)?
+    };
     let path = PathBuf::from(&target.path);
     tokio::fs::create_dir_all(&path)
         .await

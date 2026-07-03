@@ -1,0 +1,292 @@
+import { useMemo, useState } from "react";
+import {
+  IconFolderPlus,
+  IconLoader2,
+  IconX,
+} from "@tabler/icons-react";
+
+export interface NewBundleValues {
+  name: string;
+  sectionLabel: string;
+  anchor: string;
+  subpath: string;
+}
+
+interface CreateBundleModalProps {
+  /** Existing section labels, so the user can reuse one or type a new one. */
+  existingSections: string[];
+  onClose: () => void;
+  onCreate: (values: NewBundleValues) => Promise<void>;
+}
+
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad/i.test(navigator.userAgent);
+
+// Anchors resolve to the platform-appropriate base folder on each machine.
+const ANCHORS: { value: string; label: string; win: string; mac: string }[] = [
+  { value: "documents", label: "Documents", win: "C:\\Users\\<you>\\Documents", mac: "~/Documents" },
+  { value: "desktop", label: "Desktop", win: "C:\\Users\\<you>\\Desktop", mac: "~/Desktop" },
+  { value: "home", label: "Home / User folder", win: "C:\\Users\\<you>", mac: "~" },
+  { value: "appSupport", label: "App Support (advanced)", win: "AppData\\Roaming", mac: "~/Library/Application Support" },
+];
+
+export function CreateBundleModal({
+  existingSections,
+  onClose,
+  onCreate,
+}: CreateBundleModalProps) {
+  const [name, setName] = useState("");
+  const [sectionMode, setSectionMode] = useState<"existing" | "new">(
+    existingSections.length > 0 ? "existing" : "new"
+  );
+  const [existingSection, setExistingSection] = useState(
+    existingSections[0] ?? ""
+  );
+  const [newSection, setNewSection] = useState("");
+  const [anchor, setAnchor] = useState("documents");
+  const [subpath, setSubpath] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const sectionLabel =
+    sectionMode === "existing" ? existingSection : newSection.trim();
+
+  const anchorInfo = useMemo(
+    () => ANCHORS.find((a) => a.value === anchor) ?? ANCHORS[0],
+    [anchor]
+  );
+
+  const cleanSub = subpath.trim().replace(/^[/\\]+|[/\\]+$/g, "");
+  const previewBase = IS_MAC ? anchorInfo.mac : anchorInfo.win;
+  const previewSep = IS_MAC ? "/" : "\\";
+  const previewPath = cleanSub
+    ? `${previewBase}${previewSep}${cleanSub.replace(/\//g, previewSep)}`
+    : previewBase;
+
+  const canSubmit =
+    name.trim().length > 0 &&
+    sectionLabel.length > 0 &&
+    cleanSub.length > 0 &&
+    !submitting;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onCreate({
+        name: name.trim(),
+        sectionLabel,
+        anchor,
+        subpath: cleanSub,
+      });
+    } catch (e) {
+      setError(
+        typeof e === "object" && e && "message" in e
+          ? String((e as { message?: unknown }).message ?? e)
+          : String(e)
+      );
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-5"
+      onClick={submitting ? undefined : onClose}
+    >
+      <div
+        className="flex max-h-[92%] w-full max-w-[500px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 border-b border-border px-6 py-5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mcm-blue-tint">
+            <IconFolderPlus size={20} stroke={2} className="text-mcm-blue" />
+          </div>
+          <div className="flex-1">
+            <div className="text-[16px] font-semibold text-ink">
+              Add custom folder
+            </div>
+            <div className="mt-0.5 text-[12px] text-body">
+              Sync any folder across your team, cross-platform
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            disabled={submitting}
+            className="shrink-0 rounded-md p-1 text-muted hover:bg-border-soft disabled:opacity-40"
+          >
+            <IconX size={20} stroke={2} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto px-6 py-5">
+          {/* Name */}
+          <label className="mb-4 block">
+            <span className="mb-1 block text-[12px] font-medium text-ink">
+              Name
+            </span>
+            <input
+              type="text"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Lower Thirds"
+              className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+            />
+          </label>
+
+          {/* Section */}
+          <div className="mb-4">
+            <span className="mb-1 block text-[12px] font-medium text-ink">
+              Section
+            </span>
+            {existingSections.length > 0 && (
+              <div className="mb-1.5 flex gap-1 rounded-md border border-border-strong bg-surface p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setSectionMode("existing")}
+                  className={`flex-1 rounded px-3 py-1 text-[12px] transition-colors ${
+                    sectionMode === "existing"
+                      ? "bg-mcm-blue text-white"
+                      : "text-body hover:text-ink"
+                  }`}
+                >
+                  Existing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSectionMode("new")}
+                  className={`flex-1 rounded px-3 py-1 text-[12px] transition-colors ${
+                    sectionMode === "new"
+                      ? "bg-mcm-blue text-white"
+                      : "text-body hover:text-ink"
+                  }`}
+                >
+                  New section
+                </button>
+              </div>
+            )}
+            {sectionMode === "existing" && existingSections.length > 0 ? (
+              <select
+                value={existingSection}
+                onChange={(e) => setExistingSection(e.target.value)}
+                className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+              >
+                {existingSections.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={newSection}
+                onChange={(e) => setNewSection(e.target.value)}
+                placeholder="e.g. My Studio Assets"
+                className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+              />
+            )}
+          </div>
+
+          {/* Folder location */}
+          <div className="mb-2">
+            <span className="mb-1 block text-[12px] font-medium text-ink">
+              Folder location
+            </span>
+            <div className="flex gap-2">
+              <select
+                value={anchor}
+                onChange={(e) => setAnchor(e.target.value)}
+                className="shrink-0 rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+              >
+                {ANCHORS.map((a) => (
+                  <option key={a.value} value={a.value}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={subpath}
+                onChange={(e) => setSubpath(e.target.value)}
+                placeholder="MyTeam/Titles"
+                className="min-w-0 flex-1 rounded-md border border-border-strong bg-white px-3 py-2 font-mono text-[12px] text-ink focus:border-mcm-blue focus:outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Cross-platform preview */}
+          <div className="mt-3 rounded-lg border border-mcm-blue/25 bg-mcm-blue-tint px-3.5 py-3">
+            <div className="mb-1.5 text-[11px] font-semibold text-mcm-blue">
+              Where files land on each machine
+            </div>
+            <div className="space-y-1 font-mono text-[11px] text-body">
+              <div>
+                <span className="text-muted">Win&nbsp;&nbsp;</span>
+                {anchorInfo.win}
+                {cleanSub ? "\\" + cleanSub.replace(/\//g, "\\") : ""}
+              </div>
+              <div>
+                <span className="text-muted">Mac&nbsp;&nbsp;</span>
+                {anchorInfo.mac}
+                {cleanSub ? "/" + cleanSub : ""}
+              </div>
+            </div>
+            <div className="mt-2 text-[11px] leading-relaxed text-body">
+              Each teammate's own username fills in automatically. This folder
+              is created if it doesn't exist yet.
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-3 rounded-md border border-error-border bg-error-row-bg px-3 py-2 text-[12px] text-error-fg">
+              {error}
+            </div>
+          )}
+
+          <div className="mt-3 text-[11px] leading-relaxed text-muted">
+            After creating, drop files into <span className="font-mono">{previewPath}</span>{" "}
+            and publish them from this screen.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 border-t border-border bg-surface px-5 py-3.5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            className="rounded-md border border-border-strong bg-white px-4 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={!canSubmit}
+            className="flex items-center gap-1.5 rounded-md bg-mcm-blue px-4 py-2 text-[13px] font-medium text-white hover:bg-mcm-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? (
+              <>
+                <IconLoader2 size={16} stroke={2} className="animate-spin" />
+                Creating…
+              </>
+            ) : (
+              <>
+                <IconFolderPlus size={16} stroke={2} />
+                Create
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -650,6 +650,36 @@ pub fn resolve_install_path(
     }
 }
 
+/// Resolve a cross-platform anchor token to an absolute base directory on the
+/// current machine. The same token resolves to the platform-appropriate
+/// location on each OS, so a folder published from Windows lands correctly on a
+/// teammate's Mac (and their username, not the publisher's, is used).
+pub fn resolve_anchor(anchor: &str) -> Result<PathBuf, PathError> {
+    match anchor {
+        "documents" => documents_dir(),
+        "desktop" => dirs::desktop_dir().ok_or_else(|| PathError::NoUserDirs {
+            message: "no Desktop directory".into(),
+        }),
+        "home" => home_dir(),
+        // App Support: AppData\Roaming on Windows, ~/Library/Application Support on macOS.
+        "appSupport" => appdata_roaming(),
+        _ => Err(PathError::UnknownPresetType {
+            preset_type: format!("anchor:{anchor}"),
+        }),
+    }
+}
+
+/// Resolve a custom bundle's target folder (anchor token + relative subpath) to
+/// an absolute path on this machine. Used for both publishing (source) and
+/// installing (destination) — they're the same folder, kept in sync.
+pub fn resolve_custom_target(anchor: &str, subpath: &str) -> Result<ResolvedTarget, PathError> {
+    let mut path = resolve_anchor(anchor)?;
+    for part in subpath.split(['/', '\\']).filter(|s| !s.is_empty()) {
+        path = path.join(part);
+    }
+    Ok(auto(path.to_string_lossy().to_string()))
+}
+
 fn auto(path: String) -> ResolvedTarget {
     ResolvedTarget {
         path,

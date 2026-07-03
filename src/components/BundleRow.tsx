@@ -19,10 +19,12 @@ const PRESET_LABEL: Record<PresetType, string> = {
   timeline: "Timeline",
   project: "Project",
   render: "Render",
+  custom: "Folder",
 };
 
-function categoryLabel(category: "premiere" | "resolve") {
-  return category === "premiere" ? "Premiere Pro" : "DaVinci Resolve";
+function categoryLabel(bundle: BundleRowData["bundle"]) {
+  if (bundle.custom) return bundle.sectionLabel ?? "Custom";
+  return bundle.category === "premiere" ? "Premiere Pro" : "DaVinci Resolve";
 }
 
 function metaLine(row: BundleRowData): { text: string; tone: "muted" | "highlight" | "error" } {
@@ -46,8 +48,8 @@ function metaLine(row: BundleRowData): { text: string; tone: "muted" | "highligh
   }
 
   const fileCount = bundle.files.length;
-  const presetLabel = PRESET_LABEL[bundle.presetType];
-  const base = `${categoryLabel(bundle.category)} · ${presetLabel} · ${fileCount} ${fileCount === 1 ? "file" : "files"}`;
+  const presetLabel = PRESET_LABEL[bundle.presetType] ?? bundle.presetType;
+  const base = `${categoryLabel(bundle)} · ${presetLabel} · ${fileCount} ${fileCount === 1 ? "file" : "files"}`;
   if (status === "notinstalled") {
     return { text: `${base} · Not installed`, tone: "muted" };
   }
