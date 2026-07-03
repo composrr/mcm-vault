@@ -420,16 +420,12 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
     return groups;
   }, [bundles]);
 
-  // Distinct custom-section labels, for the "reuse existing section" picker.
-  const customSectionLabels = useMemo(() => {
-    const out: string[] = [];
-    for (const b of bundles) {
-      if (b.custom && b.sectionLabel && !out.includes(b.sectionLabel)) {
-        out.push(b.sectionLabel);
-      }
-    }
-    return out;
-  }, [bundles]);
+  // All section labels (built-in + custom), for the "reuse existing section"
+  // picker — so a custom folder can join Premiere/Resolve or any custom section.
+  const sectionLabels = useMemo(
+    () => categories.map((c) => c.label),
+    [categories]
+  );
 
   const handleCreateBundle = async (values: NewBundleValues) => {
     const newId = await createCustomBundle(values);
@@ -671,7 +667,7 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
 
       {showCreate && (
         <CreateBundleModal
-          existingSections={customSectionLabels}
+          existingSections={sectionLabels}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreateBundle}
         />

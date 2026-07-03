@@ -838,7 +838,14 @@ pub async fn create_custom_bundle(
         n += 1;
     }
 
-    let category = slugify(&input.section_label);
+    // Map the built-in section labels to their canonical category slug so a
+    // custom folder added to "Premiere Pro" / "DaVinci Resolve" joins the real
+    // section instead of creating a lookalike with a different slug.
+    let category = match input.section_label.trim() {
+        "Premiere Pro" => "premiere".to_string(),
+        "DaVinci Resolve" => "resolve".to_string(),
+        other => slugify(other),
+    };
     let repo_path = format!("custom/{id}");
     let now_iso = chrono::Utc::now().to_rfc3339();
 
