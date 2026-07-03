@@ -36,12 +36,10 @@ export function CreateBundleModal({
   onClose,
   onCreate,
 }: CreateBundleModalProps) {
+  const NEW_SECTION = "__new__";
   const [name, setName] = useState("");
-  const [sectionMode, setSectionMode] = useState<"existing" | "new">(
-    existingSections.length > 0 ? "existing" : "new"
-  );
-  const [existingSection, setExistingSection] = useState(
-    existingSections[0] ?? ""
+  const [sectionChoice, setSectionChoice] = useState(
+    existingSections[0] ?? NEW_SECTION
   );
   const [newSection, setNewSection] = useState("");
   const [anchor, setAnchor] = useState("documents");
@@ -50,7 +48,7 @@ export function CreateBundleModal({
   const [error, setError] = useState<string | null>(null);
 
   const sectionLabel =
-    sectionMode === "existing" ? existingSection : newSection.trim();
+    sectionChoice === NEW_SECTION ? newSection.trim() : sectionChoice;
 
   const anchorInfo = useMemo(
     () => ANCHORS.find((a) => a.value === anchor) ?? ANCHORS[0],
@@ -146,51 +144,26 @@ export function CreateBundleModal({
             <span className="mb-1 block text-[12px] font-medium text-ink">
               Section
             </span>
-            {existingSections.length > 0 && (
-              <div className="mb-1.5 flex gap-1 rounded-md border border-border-strong bg-surface p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setSectionMode("existing")}
-                  className={`flex-1 rounded px-3 py-1 text-[12px] transition-colors ${
-                    sectionMode === "existing"
-                      ? "bg-mcm-blue text-white"
-                      : "text-body hover:text-ink"
-                  }`}
-                >
-                  Existing
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSectionMode("new")}
-                  className={`flex-1 rounded px-3 py-1 text-[12px] transition-colors ${
-                    sectionMode === "new"
-                      ? "bg-mcm-blue text-white"
-                      : "text-body hover:text-ink"
-                  }`}
-                >
-                  New section
-                </button>
-              </div>
-            )}
-            {sectionMode === "existing" && existingSections.length > 0 ? (
-              <select
-                value={existingSection}
-                onChange={(e) => setExistingSection(e.target.value)}
-                className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
-              >
-                {existingSections.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            ) : (
+            <select
+              value={sectionChoice}
+              onChange={(e) => setSectionChoice(e.target.value)}
+              className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+            >
+              {existingSections.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+              <option value={NEW_SECTION}>+ Create new section…</option>
+            </select>
+            {sectionChoice === NEW_SECTION && (
               <input
                 type="text"
+                autoFocus
                 value={newSection}
                 onChange={(e) => setNewSection(e.target.value)}
-                placeholder="e.g. My Studio Assets"
-                className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+                placeholder="New section name — e.g. My Studio Assets"
+                className="mt-1.5 w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
               />
             )}
           </div>
