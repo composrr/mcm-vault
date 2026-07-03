@@ -25,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(install::InstallControl::new())
         .invoke_handler(tauri::generate_handler![
             app_branding,
@@ -39,6 +40,7 @@ pub fn run() {
             path_resolver::scan_host_apps,
             path_resolver::resolve_target,
             path_resolver::list_install_target_versions,
+            path_resolver::anchor_paths,
             install::install_bundle,
             install::uninstall_bundle,
             install::reveal_path,

@@ -274,6 +274,19 @@ export async function publisherDefaultSource(
   return invoke<string>("publisher_default_source", { bundle, folderLabel });
 }
 
+/** Absolute base path for each supported anchor token on this machine. */
+export async function anchorPaths(): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("anchor_paths");
+}
+
+/** Open a native folder picker. Returns the chosen absolute path, or null if
+ *  the user cancelled. */
+export async function pickFolder(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const result = await open({ directory: true, multiple: false });
+  return typeof result === "string" ? result : null;
+}
+
 export interface CreateCustomBundleInput {
   name: string;
   sectionLabel: string;

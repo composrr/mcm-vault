@@ -669,6 +669,20 @@ pub fn resolve_anchor(anchor: &str) -> Result<PathBuf, PathError> {
     }
 }
 
+/// Return each supported anchor token mapped to its absolute base directory on
+/// this machine. Used by the custom-bundle "Browse" flow to map a picked folder
+/// back to an anchor + relative subpath. Anchors that can't resolve are omitted.
+#[tauri::command]
+pub fn anchor_paths() -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for anchor in ["documents", "desktop", "home", "appSupport"] {
+        if let Ok(p) = resolve_anchor(anchor) {
+            out.insert(anchor.to_string(), p.to_string_lossy().to_string());
+        }
+    }
+    out
+}
+
 /// Resolve a custom bundle's target folder (anchor token + relative subpath) to
 /// an absolute path on this machine. Used for both publishing (source) and
 /// installing (destination) — they're the same folder, kept in sync.

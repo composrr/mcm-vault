@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IconFolderPlus,
+  IconFolderSearch,
   IconLoader2,
   IconX,
 } from "@tabler/icons-react";
+import { anchorPaths, pickFolder } from "../lib/tauri";
 
 export interface NewBundleValues {
   name: string;
@@ -46,6 +48,55 @@ export function CreateBundleModal({
   const [subpath, setSubpath] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bases, setBases] = useState<Record<string, string>>({});
+  const [browseError, setBrowseError] = useState<string | null>(null);
+
+  // Load each anchor's absolute base path so a browsed folder can be mapped
+  // back to an anchor + relative subpath.
+  useEffect(() => {
+    const isTauriEnv =
+      typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    if (!isTauriEnv) return;
+    anchorPaths()
+      .then(setBases)
+      .catch(() => setBases({}));
+  }, []);
+
+  const browse = async () => {
+    setBrowseError(null);
+    let picked: string | null;
+    try {
+      picked = await pickFolder();
+    } catch {
+      return;
+    }
+    if (!picked) return;
+    // Match the picked path to the most specific anchor whose base contains it.
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+    const isWin = picked.includes("\\") || /^[a-zA-Z]:/.test(picked);
+    const fold = (p: string) => (isWin ? p.toLowerCase() : p);
+    const pickedN = fold(norm(picked));
+    let best: { token: string; sub: string; baseLen: number } | null = null;
+    for (const [token, base] of Object.entries(bases)) {
+      const baseN = fold(norm(base));
+      if (pickedN === baseN) {
+        if (!best || baseN.length > best.baseLen)
+          best = { token, sub: "", baseLen: baseN.length };
+      } else if (pickedN.startsWith(baseN + "/")) {
+        const sub = norm(picked).slice(norm(base).length + 1);
+        if (!best || baseN.length > best.baseLen)
+          best = { token, sub, baseLen: baseN.length };
+      }
+    }
+    if (!best) {
+      setBrowseError(
+        "That folder isn't under Documents, Desktop, Home, or App Support. Pick a folder inside one of those so it can sync cross-platform."
+      );
+      return;
+    }
+    setAnchor(best.token);
+    setSubpath(best.sub);
+  };
 
   const sectionLabel =
     sectionChoice === NEW_SECTION ? newSection.trim() : sectionChoice;
@@ -170,9 +221,19 @@ export function CreateBundleModal({
 
           {/* Folder location */}
           <div className="mb-2">
-            <span className="mb-1 block text-[12px] font-medium text-ink">
-              Folder location
-            </span>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[12px] font-medium text-ink">
+                Folder location
+              </span>
+              <button
+                type="button"
+                onClick={() => void browse()}
+                className="flex items-center gap-1 rounded-md border border-border-strong bg-white px-2 py-1 text-[11px] text-body hover:bg-border-soft"
+              >
+                <IconFolderSearch size={13} stroke={2} />
+                Browse…
+              </button>
+            </div>
             <div className="flex gap-2">
               <select
                 value={anchor}
@@ -193,6 +254,11 @@ export function CreateBundleModal({
                 className="min-w-0 flex-1 rounded-md border border-border-strong bg-white px-3 py-2 font-mono text-[12px] text-ink focus:border-mcm-blue focus:outline-none"
               />
             </div>
+            {browseError && (
+              <div className="mt-1.5 rounded-md border border-warning-border bg-warning-bg px-2.5 py-1.5 text-[11px] text-warning-text">
+                {browseError}
+              </div>
+            )}
           </div>
 
           {/* Cross-platform preview */}
