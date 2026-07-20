@@ -7,6 +7,7 @@ import { StatusBar } from "./components/StatusBar";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { BundleDetailView } from "./components/BundleDetailView";
 import { ManualImportModal } from "./components/ManualImportModal";
+import { UpdateAvailableModal } from "./components/UpdateAvailableModal";
 import { FirstRunWelcome } from "./components/FirstRunWelcome";
 import { NoHostAppsState } from "./components/NoHostAppsState";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -23,9 +24,27 @@ import {
 
 type View = "main" | "detail" | "settings" | "publish";
 
+const SKIPPED_UPDATE_KEY = "mcmvault.skippedUpdateVersion";
+
+interface UpdaterEvent {
+  event: "Started" | "Progress" | "Finished";
+  data?: { contentLength?: number; chunkLength?: number };
+}
+
+interface PendingUpdate {
+  version: string;
+  currentVersion: string;
+  body?: string;
+  downloadAndInstall: (onEvent?: (e: UpdaterEvent) => void) => Promise<void>;
+}
+
 function App() {
   const [filter, setFilter] = useState<CategoryFilter>("all");
   const [appVersion, setAppVersion] = useState<string>("");
+  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isTauri()) {
@@ -76,9 +95,9 @@ function App() {
     void init();
   }, [init]);
 
-  // Background-check for app updates on launch. If a newer build exists,
-  // we silently download + install + restart. Auto-updater is signed by
-  // our minisign key so this is safe to do without confirmation.
+  // On launch, check for an app update and PROMPT the user — never auto-install.
+  // The user chooses Update now / Later / Skip. "Skip" suppresses that specific
+  // version until a newer one ships.
   useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
@@ -87,9 +106,8 @@ function App() {
         const { check } = await import("@tauri-apps/plugin-updater");
         const update = await check();
         if (cancelled || !update) return;
-        await update.downloadAndInstall();
-        const { relaunch } = await import("@tauri-apps/plugin-process");
-        await relaunch();
+        if (localStorage.getItem(SKIPPED_UPDATE_KEY) === update.version) return;
+        setPendingUpdate(update);
       } catch (e) {
         console.warn("App update check failed (ignored)", e);
       }
@@ -98,6 +116,43 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  const runUpdateNow = useCallback(async () => {
+    if (!pendingUpdate) return;
+    setUpdateDownloading(true);
+    setUpdateError(null);
+    setUpdateProgress(null);
+    try {
+      let total = 0;
+      let downloaded = 0;
+      await pendingUpdate.downloadAndInstall((event: UpdaterEvent) => {
+        if (event.event === "Started") {
+          total = event.data?.contentLength ?? 0;
+          setUpdateProgress(0);
+        } else if (event.event === "Progress") {
+          downloaded += event.data?.chunkLength ?? 0;
+          if (total > 0) setUpdateProgress((downloaded / total) * 100);
+        } else if (event.event === "Finished") {
+          setUpdateProgress(100);
+        }
+      });
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    } catch (e) {
+      setUpdateError(
+        typeof e === "object" && e && "message" in e
+          ? String((e as { message?: unknown }).message ?? e)
+          : String(e)
+      );
+      setUpdateDownloading(false);
+    }
+  }, [pendingUpdate]);
+
+  const dismissUpdate = useCallback(() => setPendingUpdate(null), []);
+  const skipUpdate = useCallback(() => {
+    if (pendingUpdate) localStorage.setItem(SKIPPED_UPDATE_KEY, pendingUpdate.version);
+    setPendingUpdate(null);
+  }, [pendingUpdate]);
 
   // No auto-install. User clicks Update all (or per-bundle Reinstall) when they
   // want to actually pull the new files. The scheduled timer below only refreshes
@@ -415,6 +470,20 @@ function App() {
             ).catch((e) => console.error("reveal_bundle_folder failed", e));
             setManualModalBundleId(null);
           }}
+        />
+      )}
+
+      {pendingUpdate && (
+        <UpdateAvailableModal
+          version={pendingUpdate.version}
+          currentVersion={pendingUpdate.currentVersion ?? appVersion}
+          notes={pendingUpdate.body ?? ""}
+          downloading={updateDownloading}
+          progressPct={updateProgress}
+          error={updateError}
+          onUpdateNow={() => void runUpdateNow()}
+          onLater={dismissUpdate}
+          onSkip={skipUpdate}
         />
       )}
     </div>
