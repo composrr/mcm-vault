@@ -16,6 +16,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import type { Bundle, BundleStatusKind, InstalledBundleState } from "../types";
+import { installRoot } from "../lib/installPath";
 
 interface BundleDetailViewProps {
   bundle: Bundle;
@@ -142,9 +143,7 @@ export function BundleDetailView({
   const categoryLabel =
     bundle.category === "premiere" ? "Premiere Pro" : "DaVinci Resolve";
   const presetLabel = PRESET_LABEL[bundle.presetType] ?? bundle.presetType;
-  const installedFiles = installed?.files ?? [];
-  const installPath =
-    installedFiles[0] ? installedFiles[0].replace(/[\\/][^\\/]+$/, "") : null;
+  const installPath = installRoot(bundle, installed);
 
   const allFiles = bundle.files;
   const hasMore = allFiles.length > FILES_PREVIEW;

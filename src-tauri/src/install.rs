@@ -163,6 +163,46 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path) -> Result
     Ok(len)
 }
 
+/// Fetch the size of every file in the repo in a SINGLE request via GitHub's git-tree API,
+/// keyed by repo-relative path (e.g. "bundles/resolve-cinematic-luts/Gamut/606/Name.cube").
+/// Lets install skip files already on disk (matching size) even when the local record has no
+/// stored sizes — without a per-file network round-trip. Returns None on any failure, in
+/// which case the caller falls back to the stored-size check only.
+async fn fetch_repo_file_sizes(
+    client: &reqwest::Client,
+) -> Option<std::collections::HashMap<String, u64>> {
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/git/trees/{}?recursive=1",
+        branding::REPO_OWNER,
+        branding::REPO_NAME,
+        branding::REPO_BRANCH
+    );
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .header("Cache-Control", "no-cache")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    let tree = json.get("tree")?.as_array()?;
+    let mut map = std::collections::HashMap::with_capacity(tree.len());
+    for entry in tree {
+        if entry.get("type").and_then(|t| t.as_str()) == Some("blob") {
+            if let (Some(path), Some(size)) = (
+                entry.get("path").and_then(|p| p.as_str()),
+                entry.get("size").and_then(|s| s.as_u64()),
+            ) {
+                map.insert(path.to_string(), size);
+            }
+        }
+    }
+    Some(map)
+}
+
 async fn current_settings() -> (String, state::InstallTargets) {
     state::read_state()
         .await
@@ -326,20 +366,31 @@ pub async fn install_bundle(
     let total = bundle.files.len();
     let prior_sizes = prior_file_sizes.unwrap_or_default();
 
-    // Skip files whose local size already matches the stored size.
-    // Check against the first target's resolved path (primary install location).
+    // Fetch every remote file size in ONE request so we can skip files already on disk with
+    // a matching size — even when the local record has no stored sizes (e.g. first install
+    // after an app update, or files placed by a previous version). Keeps reinstalls
+    // near-instant instead of re-downloading everything.
+    let remote_sizes = fetch_repo_file_sizes(&client).await;
+
+    // Skip files whose local size already matches the expected size (stored record first,
+    // then the remote size). Check against the first target's resolved path.
     let primary_dir = targets.first().map(|t| PathBuf::from(&t.path)).unwrap_or_default();
     let mut to_download: Vec<String> = Vec::new();
     let mut skipped_sizes: HashMap<String, u64> = HashMap::new();
 
     for file_name in &bundle.files {
-        if let Some(&stored_size) = prior_sizes.get(file_name.as_str()) {
+        let expected = prior_sizes.get(file_name.as_str()).copied().or_else(|| {
+            remote_sizes
+                .as_ref()
+                .and_then(|sizes| sizes.get(&format!("{}/{}", bundle.path, file_name)).copied())
+        });
+        if let Some(expected) = expected {
             if let Some((dst_dir, basename)) =
                 route_for_file(&bundle.preset_type, &primary_dir, file_name)
             {
                 if let Ok(meta) = std::fs::metadata(dst_dir.join(&basename)) {
-                    if meta.len() == stored_size {
-                        skipped_sizes.insert(file_name.clone(), stored_size);
+                    if meta.len() == expected {
+                        skipped_sizes.insert(file_name.clone(), meta.len());
                         continue;
                     }
                 }
