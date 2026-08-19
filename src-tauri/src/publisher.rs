@@ -473,6 +473,21 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
             .map(|n| repo_name_for(preset_type, n))
             .collect();
 
+        // Compare manifest names to local names case-insensitively. Two machines
+        // can disagree on the casing of a folder ("Phantom Luts" vs "Phantom
+        // LUTS"); an exact match would treat the manifest entry as owned by
+        // another machine, preserve it, AND add the local spelling — leaving the
+        // bundle listing the same preset twice.
+        let local_repo_keys: std::collections::HashSet<String> =
+            local_repo_names.iter().map(|n| n.to_lowercase()).collect();
+        let prior_repo_keys: std::collections::HashSet<String> =
+            prior_repo_names.iter().map(|n| n.to_lowercase()).collect();
+        let excluded_keys: std::collections::HashSet<String> = plan
+            .explicitly_excluded
+            .iter()
+            .map(|n| n.to_lowercase())
+            .collect();
+
         // Preserve manifest files that:
         //   - don't exist locally (another machine owns them)
         //   - aren't explicitly excluded by the user
@@ -480,15 +495,19 @@ pub async fn publish_bundles(app_handle: AppHandle, plans: Vec<PublishPlan>) -> 
         let mut new_bundle_files: Vec<String> = current_manifest_files
             .iter()
             .filter(|name| {
-                !local_repo_names.contains(*name)
-                    && !plan.explicitly_excluded.contains(*name)
-                    && !prior_repo_names.contains(*name)
+                let key = name.to_lowercase();
+                !local_repo_keys.contains(&key)
+                    && !excluded_keys.contains(&key)
+                    && !prior_repo_keys.contains(&key)
             })
             .cloned()
             .collect();
         for name in &plan.included_file_names {
             let repo_rel = repo_name_for(preset_type, name);
-            if !new_bundle_files.contains(&repo_rel) {
+            if !new_bundle_files
+                .iter()
+                .any(|f| f.to_lowercase() == repo_rel.to_lowercase())
+            {
                 new_bundle_files.push(repo_rel);
             }
         }

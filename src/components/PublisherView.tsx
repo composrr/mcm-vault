@@ -114,6 +114,15 @@ const IS_MAC =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad/i.test(navigator.userAgent);
 
+// A file on disk and the same file in the manifest can be spelled differently:
+// two machines may disagree on folder casing ("Phantom Luts" vs "Phantom LUTS"),
+// macOS hands back decomposed Unicode, and Windows uses backslashes. Compare on
+// a normalized key so a preset that is already in the repo is never shown as
+// unpublished just because another machine published it.
+function nameKey(name: string): string {
+  return name.replace(/\\/g, "/").normalize("NFC").toLowerCase();
+}
+
 function repoNameToLocalName(presetType: string, repoName: string): string | null {
   if (presetType !== "keyboard") return repoName;
   const normalized = repoName.replace(/\\/g, "/");
@@ -210,10 +219,14 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
       for (const diff of results) {
         const bundle = freshBundlesById[diff.bundleId];
         if (!bundle) continue;
-        const localNames = new Set(diff.currentFiles.map((f) => f.name));
+        // Map normalized key -> the spelling this machine actually has on disk,
+        // so the checkbox state uses local names while still matching the
+        // manifest's spelling from whichever machine published it.
+        const localByKey = new Map(diff.currentFiles.map((f) => [nameKey(f.name), f.name]));
         const seeded = bundle.files
           .map((n) => repoNameToLocalName(bundle.presetType, n))
-          .filter((n): n is string => n !== null && localNames.has(n));
+          .map((n) => (n === null ? null : localByKey.get(nameKey(n)) ?? null))
+          .filter((n): n is string => n !== null);
         nextPublisher[diff.bundleId] = {
           ...nextPublisher[diff.bundleId],
           includedFiles: seeded,
@@ -297,9 +310,9 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
     if ((persisted.publisher[bundleId]?.excludedRemoteFiles?.length ?? 0) > 0) return true;
     const localNames = new Set(status.diff.currentFiles.map((f) => f.name));
     const sel = selectedFor(bundleId);
-    const manifestSet = new Set(bundle.files);
+    const manifestKeys = new Set(bundle.files.map(nameKey));
     for (const name of localNames) {
-      if (manifestSet.has(name) !== sel.has(name)) return true;
+      if (manifestKeys.has(nameKey(name)) !== sel.has(name)) return true;
     }
     if (status.diff.modified.some((name) => sel.has(name))) return true;
     return false;
@@ -317,14 +330,14 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
       .map((b) => {
         const status = diffs[b.id];
         const sel = selectedFor(b.id);
-        const manifestSet = new Set(b.files);
+        const manifestKeys = new Set(b.files.map(nameKey));
         const localFiles = status?.diff.currentFiles ?? [];
         const modifiedSet = new Set(status?.diff.modified ?? []);
         const added: string[] = [];
         const removed: string[] = [];
         const modified: string[] = [];
         for (const f of localFiles) {
-          const inManifest = manifestSet.has(f.name);
+          const inManifest = manifestKeys.has(nameKey(f.name));
           const isSel = sel.has(f.name);
           if (isSel && !inManifest) added.push(f.name);
           else if (!isSel && inManifest) removed.push(f.name);
@@ -587,7 +600,7 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
                     const fileCount = status?.diff.currentFiles.length ?? bundle.files.length;
                     const addCount = hasChanges
                       ? status?.diff.currentFiles.filter(
-                          (f) => selectedFor(bundle.id).has(f.name) && !new Set(bundle.files).has(f.name)
+                          (f) => selectedFor(bundle.id).has(f.name) && !new Set(bundle.files.map(nameKey)).has(nameKey(f.name))
                         ).length ?? 0
                       : 0;
                     const modCount = hasChanges
@@ -855,14 +868,14 @@ interface FileRowItemProps {
   displayName: string;
   depth: number;
   selected: Set<string>;
-  manifestSet: Set<string>;
+  manifestKeys: Set<string>;
   modifiedNames: string[];
   onToggleFile: (name: string) => void;
 }
 
-function FileRowItem({ f, displayName, depth, selected, manifestSet, modifiedNames, onToggleFile }: FileRowItemProps) {
+function FileRowItem({ f, displayName, depth, selected, manifestKeys, modifiedNames, onToggleFile }: FileRowItemProps) {
   const isSelected = selected.has(f.name);
-  const inManifest = manifestSet.has(f.name);
+  const inManifest = manifestKeys.has(nameKey(f.name));
   const isModified = modifiedNames.includes(f.name);
   let statusLabel = "";
   let statusClass = "bg-border-soft text-muted";
@@ -900,18 +913,18 @@ interface DirNodeProps {
   dir: FileTreeDir;
   depth: number;
   selected: Set<string>;
-  manifestSet: Set<string>;
+  manifestKeys: Set<string>;
   modifiedNames: string[];
   onToggleFile: (name: string) => void;
   onToggleFiles: (names: string[], checked: boolean) => void;
 }
 
-function DirNode({ dir, depth, selected, manifestSet, modifiedNames, onToggleFile, onToggleFiles }: DirNodeProps) {
+function DirNode({ dir, depth, selected, manifestKeys, modifiedNames, onToggleFile, onToggleFiles }: DirNodeProps) {
   const allNames = collectDirFileNames(dir);
   const selCount = allNames.filter((n) => selected.has(n)).length;
   const allSel = allNames.length > 0 && selCount === allNames.length;
   const someSel = selCount > 0 && !allSel;
-  const inBundleCount = allNames.filter((n) => manifestSet.has(n)).length;
+  const inBundleCount = allNames.filter((n) => manifestKeys.has(nameKey(n))).length;
 
   let folderBadge = "";
   let folderBadgeClass = "bg-border-soft text-muted";
@@ -919,7 +932,7 @@ function DirNode({ dir, depth, selected, manifestSet, modifiedNames, onToggleFil
   else if (selCount < inBundleCount) { folderBadge = "will remove"; folderBadgeClass = "bg-error-bg text-error-fg"; }
   else if (allSel && inBundleCount > 0) { folderBadge = "in bundle"; folderBadgeClass = "bg-success-bg/60 text-success-fg"; }
 
-  const childProps = { selected, manifestSet, modifiedNames, onToggleFile, onToggleFiles };
+  const childProps = { selected, manifestKeys, modifiedNames, onToggleFile, onToggleFiles };
   return (
     <details className="border-b border-border-soft last:border-b-0">
       <summary className="flex cursor-pointer list-none items-center gap-2.5 bg-surface py-2 pr-3 text-[12px] hover:bg-border-soft" style={{ paddingLeft: `${12 + depth * 16}px` }}>
@@ -937,7 +950,7 @@ function DirNode({ dir, depth, selected, manifestSet, modifiedNames, onToggleFil
           const basename = f.name.split("/").pop() ?? f.name;
           return (
             <FileRowItem key={f.name} f={f} displayName={basename.replace(/\.[^.]+$/, "")} depth={depth + 1}
-              selected={selected} manifestSet={manifestSet} modifiedNames={modifiedNames} onToggleFile={onToggleFile} />
+              selected={selected} manifestKeys={manifestKeys} modifiedNames={modifiedNames} onToggleFile={onToggleFile} />
           );
         })}
       </div>
@@ -963,7 +976,7 @@ interface BundlePanelProps {
 function BundlePanel({ bundle, folderLabel, status, entry, selected, dirty, onToggleFile, onToggleFiles, onUpdateSourcePath, onReveal }: BundlePanelProps) {
   const sourcePath = entry?.sourcePath ?? "(scanning…)";
   const localFiles = status?.diff.currentFiles ?? [];
-  const manifestSet = new Set(bundle.files);
+  const manifestKeys = new Set(bundle.files.map(nameKey));
   const modifiedNames = status?.diff.modified ?? [];
   const tree = buildFileTree(localFiles);
   const checkedCount = Array.from(selected).filter((n) => localFiles.some((f) => f.name === n)).length;
@@ -1075,11 +1088,11 @@ function BundlePanel({ bundle, folderLabel, status, entry, selected, dirty, onTo
       ) : (
         <div className="overflow-hidden rounded-md border border-border bg-white">
           {tree.dirs.map((dir) => (
-            <DirNode key={dir.name} dir={dir} depth={0} selected={selected} manifestSet={manifestSet} modifiedNames={modifiedNames} onToggleFile={onToggleFile} onToggleFiles={onToggleFiles} />
+            <DirNode key={dir.name} dir={dir} depth={0} selected={selected} manifestKeys={manifestKeys} modifiedNames={modifiedNames} onToggleFile={onToggleFile} onToggleFiles={onToggleFiles} />
           ))}
           {tree.files.map((f) => (
             <FileRowItem key={f.name} f={f} displayName={(f.name.split("/").pop() ?? f.name).replace(/\.[^.]+$/, "")} depth={0}
-              selected={selected} manifestSet={manifestSet} modifiedNames={modifiedNames} onToggleFile={onToggleFile} />
+              selected={selected} manifestKeys={manifestKeys} modifiedNames={modifiedNames} onToggleFile={onToggleFile} />
           ))}
         </div>
       )}
