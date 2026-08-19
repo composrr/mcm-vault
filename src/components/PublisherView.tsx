@@ -23,11 +23,54 @@ import {
   revealPath,
   scanPublishDiffs,
   type BundleDiff,
+  type PublishedBundle,
   type PublishPlan,
 } from "../lib/tauri";
 import { PublishProgressModal } from "./PublishProgressModal";
 import { CreateBundleModal, type NewBundleValues } from "./CreateBundleModal";
 import { useAppStore } from "../store/useAppStore";
+
+// True when `a` is the same version as `b` or newer. Non-numeric segments are
+// treated as "not newer" so callers fall back to the state they know is good.
+function versionAtLeast(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
+// Write a completed publish into the in-memory manifest. With `onlyIfStale`,
+// bundles the manifest already reports at that version (or newer) are left
+// alone, so a genuinely fresh fetch is never overwritten.
+function applyPublishedToManifest(
+  published: PublishedBundle[],
+  opts?: { onlyIfStale?: boolean }
+) {
+  const currentManifest = useAppStore.getState().manifest;
+  if (!currentManifest) return;
+  let changed = false;
+  const patchedBundles = currentManifest.bundles.map((b) => {
+    const pub = published.find((p) => p.bundleId === b.id);
+    if (!pub) return b;
+    if (opts?.onlyIfStale && versionAtLeast(b.version, pub.newVersion)) return b;
+    changed = true;
+    return {
+      ...b,
+      version: pub.newVersion,
+      files: pub.files,
+      updatedAt: pub.publishedAt,
+      fileDates: pub.fileDates,
+    };
+  });
+  if (changed) {
+    useAppStore.setState({ manifest: { ...currentManifest, bundles: patchedBundles } });
+  }
+}
 
 function bumpPatch(v: string): string {
   const parts = v.split(".");
@@ -365,16 +408,13 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
       });
       // Patch the in-memory manifest immediately so the publisher UI reflects
       // the new file list without waiting for GitHub CDN cache to expire.
-      const currentManifest = useAppStore.getState().manifest;
-      if (currentManifest) {
-        const patchedBundles = currentManifest.bundles.map((b) => {
-          const pub = result.published.find((p) => p.bundleId === b.id);
-          if (!pub) return b;
-          return { ...b, version: pub.newVersion, files: pub.files, updatedAt: pub.publishedAt, fileDates: pub.fileDates };
-        });
-        useAppStore.setState({ manifest: { ...currentManifest, bundles: patchedBundles } });
-      }
+      applyPublishedToManifest(result.published);
+      // The refresh below normally reads a stale CDN copy that still lists the
+      // old files. Re-apply the publish for any bundle that comes back at an
+      // older version, or scan() re-seeds the checkboxes from the stale list
+      // and the files just published show up unchecked again.
       try { await useAppStore.getState().refreshManifest(); } catch {}
+      applyPublishedToManifest(result.published, { onlyIfStale: true });
       await scan();
     } catch (e) {
       setPublishError(formatError(e));
