@@ -149,6 +149,25 @@ export async function installBundle(
   });
 }
 
+export interface PreviewFile {
+  name: string;
+  /** "new" (not on disk), "update" (on disk, differs) or "unchanged". */
+  status: "new" | "update" | "unchanged";
+}
+
+/** Ask the backend what install_bundle would actually change, file by file. */
+export async function previewInstall(
+  bundle: Bundle,
+  pathOverride?: string | null,
+  priorFileSizes?: Record<string, number> | null
+): Promise<PreviewFile[]> {
+  return invoke<PreviewFile[]>("preview_install", {
+    bundle,
+    pathOverride: pathOverride ?? null,
+    priorFileSizes: priorFileSizes ?? null,
+  });
+}
+
 export interface ResolvedTarget {
   path: string;
   installType: "auto" | "manual";

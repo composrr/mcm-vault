@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IconAlertTriangle,
   IconArrowBackUp,
@@ -17,6 +17,8 @@ import {
 } from "@tabler/icons-react";
 import type { Bundle, BundleStatusKind, InstalledBundleState } from "../types";
 import { installRoot } from "../lib/installPath";
+import { isTauri, previewInstall, type PreviewFile } from "../lib/tauri";
+import { useAppStore } from "../store/useAppStore";
 
 interface BundleDetailViewProps {
   bundle: Bundle;
@@ -145,7 +147,49 @@ export function BundleDetailView({
   const presetLabel = PRESET_LABEL[bundle.presetType] ?? bundle.presetType;
   const installPath = installRoot(bundle, installed);
 
-  const allFiles = bundle.files;
+  // What would an install actually change? Ask the backend, which answers with
+  // the same size check the installer uses to skip unchanged files.
+  const pathOverride = useAppStore(
+    (s) => s.persisted.pathOverrides[`${bundle.category}:${bundle.presetType}`] ?? null
+  );
+  const [preview, setPreview] = useState<PreviewFile[] | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const priorSizes = installed?.fileSizes ?? null;
+
+  useEffect(() => {
+    if (!isTauri() || status !== "update") {
+      setPreview(null);
+      setPreviewFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setPreview(null);
+    setPreviewFailed(false);
+    void previewInstall(bundle, pathOverride, priorSizes)
+      .then((rows) => { if (!cancelled) setPreview(rows); })
+      .catch(() => { if (!cancelled) setPreviewFailed(true); });
+    return () => { cancelled = true; };
+  }, [bundle, status, pathOverride, priorSizes]);
+
+  const statusByFile = useMemo(() => {
+    const m: Record<string, PreviewFile["status"]> = {};
+    for (const r of preview ?? []) m[r.name] = r.status;
+    return m;
+  }, [preview]);
+
+  const pendingCount = (preview ?? []).filter((r) => r.status !== "unchanged").length;
+  const newCount = (preview ?? []).filter((r) => r.status === "new").length;
+  const changedCount = (preview ?? []).filter((r) => r.status === "update").length;
+
+  // Put the files that will actually change at the top, so the truncated
+  // preview list shows the answer without needing to expand it.
+  const allFiles = useMemo(() => {
+    if (!preview) return bundle.files;
+    const rank = (n: string) =>
+      statusByFile[n] === "update" ? 0 : statusByFile[n] === "new" ? 1 : 2;
+    return [...bundle.files].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  }, [bundle.files, preview, statusByFile]);
+
   const hasMore = allFiles.length > FILES_PREVIEW;
   const visibleFiles = filesExpanded ? allFiles : allFiles.slice(0, FILES_PREVIEW);
   const hiddenCount = allFiles.length - FILES_PREVIEW;
@@ -199,7 +243,26 @@ export function BundleDetailView({
         )}
 
         <section className="px-5 pb-3">
-          <div className="mb-2 text-[11px] tracking-wide text-muted">FILES ({allFiles.length})</div>
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <span className="text-[11px] tracking-wide text-muted">FILES ({allFiles.length})</span>
+            {status === "update" && (
+              <span className="text-[11px] text-body">
+                {preview
+                  ? pendingCount === 0
+                    ? "Nothing to download — all files already current"
+                    : [
+                        changedCount > 0 ? `${changedCount} to update` : null,
+                        newCount > 0 ? `${newCount} new` : null,
+                        `${allFiles.length - pendingCount} unchanged`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                  : previewFailed
+                    ? "Could not check which files will change"
+                    : "Checking which files will change…"}
+              </span>
+            )}
+          </div>
           <div className="overflow-hidden rounded-lg border border-border bg-surface">
             {visibleFiles.map((file) => (
               <div
@@ -208,6 +271,18 @@ export function BundleDetailView({
               >
                 <IconFile size={14} stroke={2} className="shrink-0 text-muted" />
                 <span className="flex-1 truncate text-[12px] text-ink">{file}</span>
+                {statusByFile[file] && statusByFile[file] !== "unchanged" && (
+                  <span
+                    className={
+                      "shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-wide " +
+                      (statusByFile[file] === "new"
+                        ? "bg-success-bg text-success-fg"
+                        : "bg-mcm-blue/15 text-mcm-blue")
+                    }
+                  >
+                    {statusByFile[file] === "new" ? "new" : "update"}
+                  </span>
+                )}
                 {bundle.fileDates?.[file] && (
                   <span className="shrink-0 text-[11px] text-muted tabular-nums">
                     {formatDate(bundle.fileDates[file])}

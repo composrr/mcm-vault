@@ -42,6 +42,7 @@ pub fn run() {
             path_resolver::list_install_target_versions,
             path_resolver::anchor_paths,
             install::install_bundle,
+            install::preview_install,
             install::uninstall_bundle,
             install::reveal_path,
             install::open_vault_folder,

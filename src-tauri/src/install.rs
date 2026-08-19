@@ -302,6 +302,90 @@ async fn snapshot_previous(
     }))
 }
 
+/// Where a bundle's files land on this machine. Shared by `install_bundle` and
+/// `preview_install` so the preview can never disagree with the real install.
+async fn resolve_targets_for(
+    bundle: &Bundle,
+    path_override: Option<&str>,
+) -> Result<Vec<path_resolver::ResolvedTarget>, InstallError> {
+    if let Some(custom) = path_override {
+        return Ok(vec![path_resolver::ResolvedTarget {
+            path: custom.to_string(),
+            install_type: "auto".into(),
+        }]);
+    }
+    if bundle.custom == Some(true) {
+        // Custom bundle: resolve its anchor + subpath to this machine's path.
+        let anchor = bundle.anchor.as_deref().unwrap_or("documents");
+        let subpath = bundle.subpath.as_deref().unwrap_or("");
+        return Ok(vec![path_resolver::resolve_custom_target(anchor, subpath)?]);
+    }
+    let (folder_label, install_targets) = current_settings().await;
+    Ok(path_resolver::resolve_install_paths(
+        &bundle.category,
+        &bundle.preset_type,
+        &folder_label,
+        &install_targets,
+    )?)
+}
+
+/// One row of the "what will this update actually change?" preview.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewFile {
+    pub name: String,
+    /// "new" (not on disk), "update" (on disk, size differs) or "unchanged".
+    pub status: String,
+}
+
+/// Report, per file, what `install_bundle` would do — using the exact same
+/// size comparison the installer uses to skip unchanged files, so the list the
+/// user reads matches the work that actually happens.
+#[tauri::command]
+pub async fn preview_install(
+    bundle: Bundle,
+    path_override: Option<String>,
+    prior_file_sizes: Option<HashMap<String, u64>>,
+) -> Result<Vec<PreviewFile>, InstallError> {
+    let targets = resolve_targets_for(&bundle, path_override.as_deref()).await?;
+    let client = http_client()?;
+    let remote_sizes = fetch_repo_file_sizes(&client).await;
+    let prior_sizes = prior_file_sizes.unwrap_or_default();
+    let primary_dir = targets
+        .first()
+        .map(|t| PathBuf::from(&t.path))
+        .unwrap_or_default();
+
+    let mut out = Vec::with_capacity(bundle.files.len());
+    for file_name in &bundle.files {
+        // Files for the other platform are never installed here — omit them
+        // rather than reporting them as pending work.
+        let Some((dst_dir, basename)) =
+            route_for_file(&bundle.preset_type, &primary_dir, file_name)
+        else {
+            continue;
+        };
+        let expected = prior_sizes.get(file_name.as_str()).copied().or_else(|| {
+            remote_sizes
+                .as_ref()
+                .and_then(|sizes| sizes.get(&format!("{}/{}", bundle.path, file_name)).copied())
+        });
+        let local = std::fs::metadata(dst_dir.join(&basename)).ok();
+        let status = match (local, expected) {
+            (None, _) => "new",
+            // Same rule as install: matching size means skip.
+            (Some(meta), Some(exp)) if meta.len() == exp => "unchanged",
+            // Present but different, or no size to compare — install re-downloads.
+            (Some(_), _) => "update",
+        };
+        out.push(PreviewFile {
+            name: file_name.clone(),
+            status: status.to_string(),
+        });
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub async fn install_bundle(
     window: Window,
@@ -311,26 +395,7 @@ pub async fn install_bundle(
     control: tauri::State<'_, Arc<InstallControl>>,
 ) -> Result<InstallResult, InstallError> {
     control.reset();
-    let (folder_label, install_targets) = current_settings().await;
-
-    let targets = if let Some(ref custom) = path_override {
-        vec![path_resolver::ResolvedTarget {
-            path: custom.clone(),
-            install_type: "auto".into(),
-        }]
-    } else if bundle.custom == Some(true) {
-        // Custom bundle: resolve its anchor + subpath to this machine's path.
-        let anchor = bundle.anchor.as_deref().unwrap_or("documents");
-        let subpath = bundle.subpath.as_deref().unwrap_or("");
-        vec![path_resolver::resolve_custom_target(anchor, subpath)?]
-    } else {
-        path_resolver::resolve_install_paths(
-            &bundle.category,
-            &bundle.preset_type,
-            &folder_label,
-            &install_targets,
-        )?
-    };
+    let targets = resolve_targets_for(&bundle, path_override.as_deref()).await?;
 
     let app_state = state::read_state().await.ok();
     let previous_install = if let Some(s) = &app_state {
