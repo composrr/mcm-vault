@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { IconDownload, IconLoader2, IconSparkles } from "@tabler/icons-react";
+import { IconDownload, IconLoader2, IconSparkles, IconX } from "@tabler/icons-react";
 
 interface UpdateAvailableModalProps {
   version: string;
@@ -77,15 +77,31 @@ export function UpdateAvailableModal({
       >
         {/* Head */}
         <div className="px-6 pb-4 pt-6">
-          <div className="text-[10px] font-bold uppercase tracking-[.09em] text-mcm-blue tabular-nums">
-            MCM Vault · Version {version}
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-bold uppercase tracking-[.09em] text-mcm-blue tabular-nums">
+                MCM Vault · Version {version}
+              </div>
+              <h2
+                className="mt-2 text-[24px] font-semibold leading-tight tracking-tight text-ink"
+                style={{ textWrap: "pretty" } as CSSProperties}
+              >
+                {headline}
+              </h2>
+            </div>
+            {/* Dismiss. Hidden mid-download so the modal can't be closed out
+                from under an install that's already running. */}
+            {!downloading && (
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={onLater}
+                className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted hover:bg-border-soft hover:text-ink"
+              >
+                <IconX size={20} stroke={2} />
+              </button>
+            )}
           </div>
-          <h2
-            className="mt-2 text-[24px] font-semibold leading-tight tracking-tight text-ink"
-            style={{ textWrap: "pretty" } as CSSProperties}
-          >
-            {headline}
-          </h2>
           <div className="mt-2 text-[12.5px] leading-relaxed text-muted tabular-nums">
             You're on v{currentVersion}.
           </div>
