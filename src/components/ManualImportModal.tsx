@@ -36,7 +36,7 @@ function renderStrong(text: string) {
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return (
-        <strong key={i} className="font-medium">
+        <strong key={i} className="font-semibold text-ink">
           {part.slice(2, -2)}
         </strong>
       );
@@ -85,15 +85,15 @@ export function ManualImportModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-border px-6 py-5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mcm-blue-tint">
-            <IconInfoCircle size={20} stroke={2} className="text-mcm-blue" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mcm-blue-tint text-mcm-blue">
+            <IconInfoCircle size={20} stroke={2} />
           </div>
-          <div className="flex-1">
-            <div className="text-[16px] font-semibold text-ink">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-semibold leading-tight text-ink">
               {modalTitle}
             </div>
-            <div className="mt-0.5 text-[12px] text-body">
-              {bundle.name} · v{bundle.version}
+            <div className="mt-0.5 truncate text-[11px] leading-tight text-muted">
+              {bundle.name} · <span className="tabular-nums">v{bundle.version}</span>
             </div>
           </div>
           <button
@@ -114,7 +114,7 @@ export function ManualImportModal({
                 stroke={2.25}
                 className="mt-0.5 shrink-0 text-success-fg"
               />
-              <div className="text-[13px] leading-relaxed text-ink">
+              <div className="text-[12.5px] leading-relaxed text-ink">
                 You've already imported this version. The {bundle.files.length}{" "}
                 {bundle.files.length === 1 ? "file is" : "files are"} synced and
                 marked as imported — nothing to do unless you want to re-import.
@@ -123,14 +123,14 @@ export function ManualImportModal({
           ) : (
             <>
               {introText && (
-                <p className="mb-4 text-[13px] leading-relaxed text-body">
+                <p className="mb-4 text-[12.5px] leading-relaxed text-body">
                   {introText}
                 </p>
               )}
 
               {/* What's new since last import */}
-              <div className="mb-4 rounded-lg border border-mcm-blue/30 bg-mcm-blue-tint px-3.5 py-3">
-                <div className="mb-1 text-[12px] font-semibold text-mcm-blue">
+              <div className="mb-4 rounded-lg border border-mcm-blue/25 bg-mcm-blue-tint px-3.5 py-3">
+                <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[.09em] text-mcm-blue">
                   {isFirstImport
                     ? `Import these ${bundle.files.length} ${
                         bundle.files.length === 1 ? "file" : "files"
@@ -144,48 +144,50 @@ export function ManualImportModal({
                     {newFiles.map((f) => (
                       <div
                         key={f}
-                        className="font-mono text-[11.5px] text-ink"
+                        className="break-all font-mono text-[10.5px] leading-snug text-ink"
                       >
                         + {f.replace(/\.[^.]+$/, "")}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-[12px] leading-relaxed text-body">
+                  <div className="text-[11px] leading-relaxed text-body">
                     No new files — but this bundle's version changed, so existing
                     grades may have been updated. Re-import to be sure.
                   </div>
                 )}
               </div>
 
-              {customSteps.map((s, i) => (
-                <div key={i} className="flex items-start gap-3 py-2.5">
-                  <div className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-mcm-blue text-[12px] font-semibold text-white">
-                    {i + 1}
-                  </div>
-                  <div className="flex-1 text-[13px] leading-relaxed text-ink">
-                    {renderStrong(s.step)}
-                  </div>
-                </div>
-              ))}
+              <ol className="space-y-2.5">
+                {customSteps.map((s, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-mcm-blue text-[10px] font-semibold tabular-nums text-white">
+                      {i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-body">
+                      {renderStrong(s.step)}
+                    </span>
+                  </li>
+                ))}
+              </ol>
             </>
           )}
 
-          <div className="mt-4 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
-            <IconFolder size={18} stroke={2} className="shrink-0 text-muted" />
-            <span className="flex-1 break-all font-mono text-[12px] text-body">
+          <div className="mt-5 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
+            <IconFolder size={15} stroke={2} className="shrink-0 text-muted" />
+            <span className="min-w-0 flex-1 break-all font-mono text-[10.5px] leading-snug text-body">
               {syncPath}
             </span>
           </div>
 
           {!alreadyImportedThisVersion && (
-            <div className="mt-3 flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
+            <div className="mt-2 flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
               <IconBulb
-                size={16}
+                size={15}
                 stroke={2}
-                className="mt-0.5 shrink-0 text-muted"
+                className="mt-px shrink-0 text-muted"
               />
-              <span className="text-[12px] leading-relaxed text-body">
+              <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-body">
                 Once you've imported them in Resolve, click{" "}
                 <span className="font-medium">Mark as imported</span> so this
                 bundle stops nagging you. We'll only flag it again when there are

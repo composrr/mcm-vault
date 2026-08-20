@@ -1,4 +1,5 @@
-import { IconDownload, IconLoader2, IconSparkles, IconX } from "@tabler/icons-react";
+import type { CSSProperties } from "react";
+import { IconDownload, IconLoader2, IconSparkles } from "@tabler/icons-react";
 
 interface UpdateAvailableModalProps {
   version: string;
@@ -12,6 +13,40 @@ interface UpdateAvailableModalProps {
   onSkip: () => void;
 }
 
+/** Light parse of GitHub-flavoured release notes: an optional leading "#"/"##"
+ *  heading becomes the headline, "-" lines become items, and everything from a
+ *  "---" separator onward (install instructions) is dropped. */
+function parseNotes(notes: string): { headline: string | null; items: string[] } {
+  const raw = notes.replace(/\r\n/g, "\n").trim();
+  if (!raw) return { headline: null, items: [] };
+
+  const lines: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) break;
+    lines.push(line);
+  }
+
+  let headline: string | null = null;
+  const items: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const heading = trimmed.match(/^#{1,6}\s+(.*)$/);
+    if (heading) {
+      if (headline === null) headline = heading[1].trim();
+      continue;
+    }
+    const bullet = trimmed.match(/^[-*]\s+(.*)$/);
+    if (bullet) {
+      const text = bullet[1].trim();
+      if (text) items.push(text);
+    }
+  }
+
+  return { headline, items };
+}
+
 export function UpdateAvailableModal({
   version,
   currentVersion,
@@ -23,57 +58,76 @@ export function UpdateAvailableModal({
   onLater,
   onSkip,
 }: UpdateAvailableModalProps) {
+  const parsed = parseNotes(notes);
+  const headline = parsed.headline ?? `What's new in v${version}`;
+  const items = parsed.items;
+  const fallbackBody = notes.trim()
+    ? notes.trim()
+    : "This update includes general improvements and fixes.";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-5"
       onClick={downloading ? undefined : onLater}
     >
       <div
-        className="w-full max-w-[480px] overflow-hidden rounded-xl bg-white shadow-2xl"
+        className="flex w-full max-w-[460px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+        style={{ maxHeight: "calc(100vh - 40px)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b border-border px-6 py-5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mcm-blue-tint">
-            <IconSparkles size={20} stroke={2} className="text-mcm-blue" />
+        {/* Head */}
+        <div className="px-6 pb-4 pt-6">
+          <div className="text-[10px] font-bold uppercase tracking-[.09em] text-mcm-blue tabular-nums">
+            MCM Vault · Version {version}
           </div>
-          <div className="flex-1">
-            <div className="text-[16px] font-semibold text-ink">
-              Update available
-            </div>
-            <div className="mt-0.5 text-[12px] text-body">
-              MCM Vault v{currentVersion} → <span className="font-medium text-mcm-blue">v{version}</span>
-            </div>
+          <h2
+            className="mt-2 text-[24px] font-semibold leading-tight tracking-tight text-ink"
+            style={{ textWrap: "pretty" } as CSSProperties}
+          >
+            {headline}
+          </h2>
+          <div className="mt-2 text-[12.5px] leading-relaxed text-muted tabular-nums">
+            You're on v{currentVersion}.
           </div>
-          {!downloading && (
-            <button
-              type="button"
-              aria-label="Later"
-              onClick={onLater}
-              className="shrink-0 rounded-md p-1 text-muted hover:bg-border-soft"
-            >
-              <IconX size={20} stroke={2} />
-            </button>
-          )}
         </div>
 
-        <div className="px-6 py-5">
-          <div className="mb-2 text-[11px] tracking-wide text-muted">WHAT'S NEW</div>
-          <div className="max-h-[240px] overflow-auto rounded-lg border border-border bg-surface px-3.5 py-3 text-[13px] leading-relaxed text-body whitespace-pre-wrap">
-            {notes.trim() ? notes.trim() : "This update includes general improvements and fixes."}
-          </div>
+        {/* Items */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-2">
+          {items.length > 0 ? (
+            <div className="flex flex-col gap-3.5">
+              {items.map((item, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-mcm-blue-tint text-mcm-blue">
+                    <IconSparkles size={17} stroke={2} />
+                  </div>
+                  <div className="min-w-0 flex-1 pt-1 text-[12.5px] leading-relaxed text-body">
+                    {item}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-body">
+              {fallbackBody}
+            </p>
+          )}
 
           {downloading && (
-            <div className="mt-4">
+            <div className="mt-5">
               <div className="mb-1.5 flex items-center justify-between text-[12px] text-body">
                 <span>Downloading update…</span>
                 {progressPct != null && (
-                  <span className="tabular-nums text-muted">{Math.round(progressPct)}%</span>
+                  <span className="tabular-nums text-muted">
+                    {Math.round(progressPct)}%
+                  </span>
                 )}
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-border-soft">
                 <div
                   className="h-full rounded-full bg-mcm-blue transition-all"
-                  style={{ width: `${progressPct != null ? Math.max(4, progressPct) : 20}%` }}
+                  style={{
+                    width: `${progressPct != null ? Math.max(4, progressPct) : 20}%`,
+                  }}
                 />
               </div>
             </div>
@@ -86,36 +140,40 @@ export function UpdateAvailableModal({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border bg-surface px-5 py-3.5">
+        {/* Foot */}
+        <div className="flex shrink-0 flex-col gap-2.5 px-6 pb-5 pt-4">
           <button
             type="button"
-            onClick={onSkip}
+            onClick={onUpdateNow}
             disabled={downloading}
-            className="rounded-md px-3 py-2 text-[13px] text-muted hover:bg-border-soft disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-mcm-blue px-4 py-2.5 text-[13px] font-medium text-white hover:bg-mcm-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Skip this version
+            {downloading ? (
+              <IconLoader2 size={16} stroke={2} className="animate-spin" />
+            ) : (
+              <IconDownload size={16} stroke={2} />
+            )}
+            {downloading ? "Updating…" : "Update and restart"}
           </button>
-          <div className="flex gap-2">
+          <div className="flex items-center justify-center gap-3 text-[12px]">
             <button
               type="button"
               onClick={onLater}
               disabled={downloading}
-              className="rounded-md border border-border-strong bg-white px-4 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-40"
+              className="rounded-md px-1.5 py-0.5 text-muted hover:text-ink disabled:opacity-40"
             >
               Later
             </button>
+            <span aria-hidden="true" className="text-border-strong">
+              ·
+            </span>
             <button
               type="button"
-              onClick={onUpdateNow}
+              onClick={onSkip}
               disabled={downloading}
-              className="flex items-center gap-1.5 rounded-md bg-mcm-blue px-4 py-2 text-[13px] font-medium text-white hover:bg-mcm-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md px-1.5 py-0.5 text-muted hover:text-ink disabled:opacity-40"
             >
-              {downloading ? (
-                <IconLoader2 size={16} stroke={2} className="animate-spin" />
-              ) : (
-                <IconDownload size={16} stroke={2} />
-              )}
-              {downloading ? "Updating…" : "Update now"}
+              Skip this version
             </button>
           </div>
         </div>

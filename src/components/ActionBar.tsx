@@ -24,7 +24,13 @@ export function ActionBar({
         className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-mcm-blue px-4 py-2 text-[13px] font-medium text-white hover:bg-mcm-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         <IconDownload size={16} stroke={2} />
-        {hasUpdates ? `Update all (${updatesAvailable})` : "Up to date"}
+        {hasUpdates ? (
+          <span>
+            Update all <span className="tabular-nums">({updatesAvailable})</span>
+          </span>
+        ) : (
+          "Up to date"
+        )}
       </button>
       <button
         type="button"

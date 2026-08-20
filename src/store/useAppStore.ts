@@ -79,7 +79,8 @@ export interface AppStore {
   init: () => Promise<void>;
   refreshManifest: () => Promise<void>;
   installOne: (bundle: Bundle) => Promise<void>;
-  installAllUpdates: () => Promise<void>;
+  /** Install every pending bundle, or only those in one category/section. */
+  installAllUpdates: (category?: string) => Promise<void>;
   cancelInstallSession: () => Promise<void>;
   removeBundle: (bundleId: string) => Promise<void>;
   restoreBundle: (bundleId: string) => Promise<void>;
@@ -287,12 +288,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     await cancelInstall().catch(() => {});
   },
 
-  async installAllUpdates() {
+  async installAllUpdates(category?: string) {
     const { manifest, persisted, installOne } = get();
     if (!manifest) return;
     const disabled = new Set(persisted.disabledBundles);
     const queue = manifest.bundles.filter((b) => {
       if (disabled.has(b.id)) return false;
+      if (category && b.category !== category) return false;
       const inst = persisted.installedBundles[b.id];
       return !inst || inst.version !== b.version;
     });

@@ -1,11 +1,11 @@
 import {
   IconAlertTriangle,
+  IconBrandGithub,
   IconCheck,
-  IconCircleDashed,
   IconCloudUpload,
-  IconLoader2,
   IconX,
 } from "@tabler/icons-react";
+import { StatusIcon } from "./StatusIcon";
 
 interface PublishProgressModalProps {
   planIds: string[];
@@ -16,6 +16,8 @@ interface PublishProgressModalProps {
   error: string | null;
   onDismiss: () => void;
 }
+
+const PILL_BASE = "shrink-0 rounded px-1.5 py-px text-[9.5px] font-semibold tracking-[.02em]";
 
 export function PublishProgressModal({
   planIds,
@@ -36,114 +38,130 @@ export function PublishProgressModal({
       />
 
       <div
-        className="relative flex w-full max-w-[400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="relative flex w-full max-w-[460px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
         style={{ maxHeight: "calc(100vh - 48px)" }}
       >
         {/* Header */}
-        <div className="flex items-center gap-2.5 border-b border-border bg-surface px-4 py-3">
-          {done ? (
-            error ? (
-              <IconAlertTriangle size={15} stroke={2} className="shrink-0 text-error-fg" />
+        <div className="flex items-center gap-3 border-b border-border px-6 py-5">
+          <div
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              done && error
+                ? "bg-error-bg text-error-fg"
+                : done
+                  ? "bg-success-bg text-success-fg"
+                  : "bg-mcm-blue-tint text-mcm-blue"
+            }`}
+          >
+            {done && error ? (
+              <IconAlertTriangle size={20} stroke={2} />
+            ) : done ? (
+              <IconCheck size={20} stroke={2.5} />
             ) : (
-              <IconCheck size={15} stroke={2} className="shrink-0 text-success-fg" />
-            )
-          ) : (
-            <IconLoader2 size={15} stroke={2} className="shrink-0 animate-spin text-mcm-blue" />
-          )}
-          <span className="flex-1 text-[13px] font-medium text-ink">
-            {done
-              ? error
-                ? "Publish failed"
-                : "Publish complete"
-              : "Publishing…"}
-          </span>
+              <IconCloudUpload size={20} stroke={2} />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-semibold text-ink">
+              {done ? (error ? "Publish failed" : "Publish complete") : "Publishing…"}
+            </div>
+            <div className="mt-0.5 text-[11px] tabular-nums text-muted">
+              {doneCount} of {planIds.length}{" "}
+              {planIds.length === 1 ? "bundle" : "bundles"} copied
+            </div>
+          </div>
           {done && (
             <button
               type="button"
               onClick={onDismiss}
-              className="rounded p-1 text-muted hover:bg-border-soft hover:text-ink"
+              className="shrink-0 rounded-md p-1 text-muted hover:bg-border-soft hover:text-ink"
               aria-label="Close"
             >
-              <IconX size={15} stroke={2} />
+              <IconX size={18} stroke={2} />
             </button>
           )}
         </div>
 
         {/* Bundle rows + commit row — scrollable */}
-        <div className="flex-1 divide-y divide-border-soft overflow-y-auto">
+        <div className="min-h-0 flex-1 divide-y divide-border-soft overflow-y-auto">
           {planIds.map((id) => {
             const phase = phases[id] ?? "queued";
             const isCopying = phase === "copying";
             const isDone = phase === "done";
             return (
-              <div key={id} className="flex items-center gap-2 px-4 py-3">
-                <div className="shrink-0">
-                  {isCopying ? (
-                    <IconLoader2 size={14} stroke={2} className="animate-spin text-mcm-blue" />
-                  ) : isDone ? (
-                    <IconCheck size={14} stroke={2} className="text-success-fg" />
-                  ) : (
-                    <IconCircleDashed size={14} stroke={2} className="text-muted" />
-                  )}
-                </div>
-                <span className="flex-1 truncate text-[12.5px] font-medium text-ink">
+              <div key={id} className="flex items-center gap-2.5 px-5 py-3">
+                <StatusIcon
+                  status={isDone ? "installed" : isCopying ? "installing" : "notinstalled"}
+                  size={20}
+                />
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
                   {names[id] ?? id}
                 </span>
-                {isCopying && (
-                  <span className="shrink-0 text-[11px] text-muted">Copying files…</span>
-                )}
-                {isDone && (
-                  <span className="shrink-0 text-[11px] text-success-fg">Done</span>
+                {isDone ? (
+                  <span className={`${PILL_BASE} bg-success-bg text-success-fg`}>
+                    done
+                  </span>
+                ) : isCopying ? (
+                  <span className={`${PILL_BASE} bg-mcm-blue/15 text-mcm-blue`}>
+                    copying
+                  </span>
+                ) : (
+                  <span className={`${PILL_BASE} bg-not-installed-bg text-muted`}>
+                    queued
+                  </span>
                 )}
               </div>
             );
           })}
 
           {/* Git push row */}
-          <div className="flex items-center gap-2 px-4 py-3">
-            <div className="shrink-0">
-              {commitPhase === "complete" ? (
-                <IconCheck size={14} stroke={2} className="text-success-fg" />
-              ) : commitPhase === "committing" ? (
-                <IconLoader2 size={14} stroke={2} className="animate-spin text-mcm-blue" />
-              ) : (
-                <IconCircleDashed size={14} stroke={2} className="text-muted" />
-              )}
+          <div className="flex items-center gap-2.5 px-5 py-3">
+            <div
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
+                commitPhase === "complete"
+                  ? "bg-success-bg text-success-fg"
+                  : commitPhase === "committing"
+                    ? "bg-mcm-blue-tint text-mcm-blue"
+                    : "bg-not-installed-bg text-not-installed-fg"
+              }`}
+            >
+              <IconBrandGithub size={12} stroke={2.5} />
             </div>
-            <span className="flex-1 text-[12.5px] font-medium text-ink">Push to GitHub</span>
-            {commitPhase === "committing" && (
-              <span className="shrink-0 text-[11px] text-muted">Pushing…</span>
-            )}
-            {commitPhase === "complete" && (
-              <span className="shrink-0 text-[11px] text-success-fg">Done</span>
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
+              Push to GitHub
+            </span>
+            {commitPhase === "complete" ? (
+              <span className={`${PILL_BASE} bg-success-bg text-success-fg`}>done</span>
+            ) : commitPhase === "committing" ? (
+              <span className={`${PILL_BASE} bg-mcm-blue/15 text-mcm-blue`}>
+                pushing
+              </span>
+            ) : (
+              <span className={`${PILL_BASE} bg-not-installed-bg text-muted`}>
+                queued
+              </span>
             )}
           </div>
         </div>
 
         {/* Error */}
         {error && (
-          <div className="mx-4 mb-1 mt-2 rounded border border-error-border bg-error-row-bg px-2.5 py-2 text-[11px] text-error-fg">
+          <div className="mx-5 mb-1 mt-2.5 shrink-0 rounded-lg border border-error-border bg-error-row-bg px-3 py-2 text-[11px] text-error-fg">
             {error}
           </div>
         )}
 
         {/* Footer */}
-        <div className="border-t border-border bg-surface px-4 py-3">
-          <div className="mb-2.5 text-[11.5px] text-muted">
-            {doneCount} of {planIds.length}{" "}
-            {planIds.length === 1 ? "bundle" : "bundles"} copied
-          </div>
+        <div className="shrink-0 border-t border-border bg-surface px-5 py-3.5">
           {done ? (
             <button
               type="button"
               onClick={onDismiss}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-mcm-blue px-4 py-2 text-[13px] font-medium text-white hover:bg-mcm-blue-hover"
+              className="flex w-full items-center justify-center gap-1.5 rounded-md bg-mcm-blue px-4 py-2 text-[13px] font-medium text-white hover:bg-mcm-blue-hover"
             >
-              <IconCloudUpload size={15} stroke={2} />
               Done
             </button>
           ) : (
-            <div className="flex items-center justify-center py-0.5 text-[11.5px] text-muted">
+            <div className="flex items-center justify-center py-1 text-[11px] text-muted">
               Publishing in progress…
             </div>
           )}

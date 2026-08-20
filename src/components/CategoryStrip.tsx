@@ -1,46 +1,61 @@
-import { IconChevronDown } from "@tabler/icons-react";
 import type { Category } from "../types";
 
 export type CategoryFilter = "all" | Category;
-
-const FILTER_LABELS: Record<CategoryFilter, string> = {
-  all: "All preset bundles",
-  premiere: "Premiere Pro",
-  resolve: "DaVinci Resolve",
-};
 
 interface CategoryStripProps {
   filter: CategoryFilter;
   onFilterChange: (next: CategoryFilter) => void;
   bundleCount: number;
+  /** Count per filter, so each chip can show how much it holds. */
+  counts?: Partial<Record<CategoryFilter, number>>;
+  /** Extra sections beyond the built-ins, as [value, label]. */
+  extraFilters?: { value: string; label: string }[];
 }
 
-export function CategoryStrip({ filter, onFilterChange, bundleCount }: CategoryStripProps) {
+/** Filter chips. Chips beat a dropdown here: every option stays visible and one
+ *  click away, and the counts are readable without opening anything. */
+export function CategoryStrip({
+  filter,
+  onFilterChange,
+  bundleCount,
+  counts,
+  extraFilters = [],
+}: CategoryStripProps) {
+  const chips: { value: CategoryFilter; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "premiere", label: "Premiere" },
+    { value: "resolve", label: "Resolve" },
+    ...extraFilters.map((f) => ({ value: f.value as CategoryFilter, label: f.label })),
+  ];
+
   return (
-    <div className="flex items-center gap-2.5 border-b border-border bg-surface px-5 py-3">
-      <span className="text-[12px] text-body">Category</span>
-      <div className="relative flex-1">
-        <select
-          value={filter}
-          onChange={(e) => onFilterChange(e.target.value as CategoryFilter)}
-          className="w-full appearance-none rounded-md border border-border-strong bg-white px-3 py-1.5 pr-8 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
-          aria-label="Filter by category"
-        >
-          {(Object.keys(FILTER_LABELS) as CategoryFilter[]).map((key) => (
-            <option key={key} value={key}>
-              {FILTER_LABELS[key]}
-            </option>
-          ))}
-        </select>
-        <IconChevronDown
-          size={16}
-          stroke={2}
-          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted"
-        />
-      </div>
-      <div className="text-[12px] text-muted whitespace-nowrap">
-        {bundleCount} {bundleCount === 1 ? "bundle" : "bundles"}
-      </div>
+    <div className="flex items-center gap-1.5 overflow-x-auto border-b border-border px-5 py-2">
+      {chips.map((chip) => {
+        const active = filter === chip.value;
+        const count = chip.value === "all" ? bundleCount : counts?.[chip.value];
+        return (
+          <button
+            key={chip.value}
+            type="button"
+            onClick={() => onFilterChange(chip.value)}
+            aria-pressed={active}
+            className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] transition-colors ${
+              active
+                ? "bg-ink font-medium text-white"
+                : "border border-border-strong text-body hover:bg-border-soft"
+            }`}
+          >
+            {chip.label}
+            {typeof count === "number" && (
+              <span
+                className={`ml-1 tabular-nums ${active ? "opacity-60" : "text-muted"}`}
+              >
+                {count}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -207,6 +207,26 @@ function App() {
     return allRows.filter((row) => row.bundle.category === filter);
   }, [allRows, filter]);
 
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of allRows) {
+      counts[row.bundle.category] = (counts[row.bundle.category] ?? 0) + 1;
+    }
+    return counts;
+  }, [allRows]);
+
+  // Custom sections get their own filter chip alongside the built-in two.
+  const extraFilters = useMemo(() => {
+    const out: { value: string; label: string }[] = [];
+    for (const row of allRows) {
+      const cat = row.bundle.category;
+      if (cat === "premiere" || cat === "resolve") continue;
+      if (out.some((f) => f.value === cat)) continue;
+      out.push({ value: cat, label: row.bundle.sectionLabel ?? cat });
+    }
+    return out;
+  }, [allRows]);
+
   const updatesAvailable = useMemo(
     () =>
       visibleRows.filter(
@@ -408,7 +428,9 @@ function App() {
           <CategoryStrip
             filter={filter}
             onFilterChange={setFilter}
-            bundleCount={visibleRows.length}
+            bundleCount={allRows.length}
+            counts={categoryCounts}
+            extraFilters={extraFilters}
           />
           {allRows.length === 0 && fetchStatus !== "loading" ? (
             <div className="flex flex-1 items-center justify-center text-[12px] text-muted">
@@ -419,6 +441,8 @@ function App() {
               rows={visibleRows}
               onRowClick={onRowClick}
               onToggleDisabled={(id) => void toggleBundleDisabled(id)}
+              onUpdateSection={(category) => void installAll(category)}
+              busy={fetchStatus === "loading" || anyInstalling}
             />
           )}
           <ActionBar

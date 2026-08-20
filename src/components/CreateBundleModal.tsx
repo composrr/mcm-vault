@@ -151,14 +151,14 @@ export function CreateBundleModal({
       >
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-6 py-5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mcm-blue-tint">
-            <IconFolderPlus size={20} stroke={2} className="text-mcm-blue" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-mcm-blue-tint text-mcm-blue">
+            <IconFolderPlus size={20} stroke={2} />
           </div>
-          <div className="flex-1">
-            <div className="text-[16px] font-semibold text-ink">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-semibold leading-tight text-ink">
               Add custom folder
             </div>
-            <div className="mt-0.5 text-[12px] text-body">
+            <div className="mt-0.5 truncate text-[11px] leading-tight text-muted">
               Sync any folder across your team, cross-platform
             </div>
           </div>
@@ -177,7 +177,7 @@ export function CreateBundleModal({
         <div className="overflow-y-auto px-6 py-5">
           {/* Name */}
           <label className="mb-4 block">
-            <span className="mb-1 block text-[12px] font-medium text-ink">
+            <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[.09em] text-muted">
               Name
             </span>
             <input
@@ -192,7 +192,7 @@ export function CreateBundleModal({
 
           {/* Section */}
           <div className="mb-4">
-            <span className="mb-1 block text-[12px] font-medium text-ink">
+            <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[.09em] text-muted">
               Section
             </span>
             <select
@@ -221,14 +221,14 @@ export function CreateBundleModal({
 
           {/* Folder location */}
           <div className="mb-2">
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[12px] font-medium text-ink">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[.09em] text-muted">
                 Folder location
               </span>
               <button
                 type="button"
                 onClick={() => void browse()}
-                className="flex items-center gap-1 rounded-md border border-border-strong bg-white px-2 py-1 text-[11px] text-body hover:bg-border-soft"
+                className="flex shrink-0 items-center gap-1 rounded-md border border-border-strong bg-white px-2 py-1 text-[11px] text-ink hover:bg-border-soft"
               >
                 <IconFolderSearch size={13} stroke={2} />
                 Browse…
@@ -263,22 +263,30 @@ export function CreateBundleModal({
 
           {/* Cross-platform preview */}
           <div className="mt-3 rounded-lg border border-mcm-blue/25 bg-mcm-blue-tint px-3.5 py-3">
-            <div className="mb-1.5 text-[11px] font-semibold text-mcm-blue">
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-[.09em] text-mcm-blue">
               Where files land on each machine
             </div>
-            <div className="space-y-1 font-mono text-[11px] text-body">
-              <div>
-                <span className="text-muted">Win&nbsp;&nbsp;</span>
-                {anchorInfo.win}
-                {cleanSub ? "\\" + cleanSub.replace(/\//g, "\\") : ""}
+            <div className="space-y-1.5">
+              <div className="flex items-start gap-2">
+                <span className="w-7 shrink-0 text-[10px] font-bold uppercase tracking-[.09em] text-muted">
+                  Win
+                </span>
+                <span className="min-w-0 flex-1 break-all font-mono text-[10.5px] leading-snug text-ink">
+                  {anchorInfo.win}
+                  {cleanSub ? "\\" + cleanSub.replace(/\//g, "\\") : ""}
+                </span>
               </div>
-              <div>
-                <span className="text-muted">Mac&nbsp;&nbsp;</span>
-                {anchorInfo.mac}
-                {cleanSub ? "/" + cleanSub : ""}
+              <div className="flex items-start gap-2">
+                <span className="w-7 shrink-0 text-[10px] font-bold uppercase tracking-[.09em] text-muted">
+                  Mac
+                </span>
+                <span className="min-w-0 flex-1 break-all font-mono text-[10.5px] leading-snug text-ink">
+                  {anchorInfo.mac}
+                  {cleanSub ? "/" + cleanSub : ""}
+                </span>
               </div>
             </div>
-            <div className="mt-2 text-[11px] leading-relaxed text-body">
+            <div className="mt-2.5 text-[11px] leading-relaxed text-body">
               Each teammate's own username fills in automatically. This folder
               is created if it doesn't exist yet.
             </div>
@@ -291,7 +299,10 @@ export function CreateBundleModal({
           )}
 
           <div className="mt-3 text-[11px] leading-relaxed text-muted">
-            After creating, drop files into <span className="font-mono">{previewPath}</span>{" "}
+            After creating, drop files into{" "}
+            <span className="break-all font-mono text-[10.5px] text-body">
+              {previewPath}
+            </span>{" "}
             and publish them from this screen.
           </div>
         </div>

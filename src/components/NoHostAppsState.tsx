@@ -1,23 +1,25 @@
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconDeviceDesktopSearch } from "@tabler/icons-react";
 
 interface NoHostAppsStateProps {
   onScanAgain: () => void;
   onGetHelp?: () => void;
 }
 
+/** Empty state, not an error state: the headline tells the user what to DO,
+ *  and the thin outline glyph keeps it calm rather than alarming. */
 export function NoHostAppsState({ onScanAgain, onGetHelp }: NoHostAppsStateProps) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-start px-10 pt-14 pb-10 text-center">
-      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-warning-bg">
-        <IconAlertTriangle size={28} stroke={2} className="text-warning-fg" />
+    <div className="flex flex-1 flex-col items-center justify-center px-10 py-16 text-center">
+      <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-border-strong">
+        <IconDeviceDesktopSearch size={28} stroke={1.5} className="text-muted" />
       </div>
-      <div className="mb-2 text-[18px] font-semibold text-ink">
-        No supported apps detected
-      </div>
-      <div className="mx-auto mb-6 max-w-[380px] text-[13px] leading-relaxed text-body">
-        MCM Vault couldn't find Adobe Premiere Pro or DaVinci Resolve on this
-        computer. Install one of them, then re-open MCM Vault.
-      </div>
+      <h2 className="mb-2 text-[17px] font-semibold leading-snug text-ink">
+        Install Premiere or Resolve to get started
+      </h2>
+      <p className="mx-auto mb-7 max-w-[340px] text-[12.5px] leading-relaxed text-body">
+        MCM Vault syncs presets into your editing apps, so it needs at least one
+        of them on this computer before it has somewhere to put them.
+      </p>
       <div className="flex justify-center gap-2">
         <button
           type="button"

@@ -162,7 +162,13 @@ export function BundleDetailView({
   onReveal,
   onRestore,
 }: BundleDetailViewProps) {
-  const [filesExpanded, setFilesExpanded] = useState(false);
+  // How many already-installed files to render. Bundles run to 1,000+ files
+  // (the LUT packs), so the settled group reveals in pages instead of dumping
+  // every row into the DOM at once.
+  const [shownSettled, setShownSettled] = useState(FILES_PREVIEW);
+  useEffect(() => {
+    setShownSettled(FILES_PREVIEW);
+  }, [bundle.id]);
 
   const previous = installed?.previousInstall;
   const canRestore = !!onRestore && !!previous;
@@ -316,13 +322,16 @@ export function BundleDetailView({
             )}
           </div>
 
-          {/* One scroll. Sticky group headers keep the reader oriented, and the
-              groups that represent actual work sort above the settled files. */}
-          <div className="max-h-[340px] overflow-y-auto rounded-lg border border-border bg-surface">
+          {/* A window inside the window: this list scrolls on its own, so a
+              1,000-file bundle never turns into a 1,000-row page. Sticky group
+              headers keep the reader oriented, and the groups that represent
+              actual work sort above the settled files. */}
+          <div className="max-h-[360px] min-h-[120px] overflow-y-auto rounded-lg border border-border bg-surface">
             {groups.map((group) => {
-              const capped = group.key !== "all" && group.tone === "muted" && !filesExpanded;
-              const shown = capped ? group.files.slice(0, FILES_PREVIEW) : group.files;
+              const settled = group.tone === "muted";
+              const shown = settled ? group.files.slice(0, shownSettled) : group.files;
               const hidden = group.files.length - shown.length;
+              const nextPage = Math.min(100, hidden);
               return (
                 <div key={group.key}>
                   {groups.length > 1 && (
@@ -367,25 +376,26 @@ export function BundleDetailView({
                   {hidden > 0 && (
                     <button
                       type="button"
-                      onClick={() => setFilesExpanded(true)}
+                      onClick={() => setShownSettled((n) => n + 100)}
                       className="flex w-full items-center justify-center gap-1.5 border-b border-border px-3.5 py-2 text-[12px] text-mcm-blue hover:bg-border-soft"
                     >
                       <IconChevronDown size={13} stroke={2} />
-                      Show {hidden} more file{hidden === 1 ? "" : "s"}
+                      Show {nextPage} more
+                      <span className="tabular-nums text-muted">
+                        ({hidden.toLocaleString()} hidden)
+                      </span>
                     </button>
                   )}
-                  {group.tone === "muted" &&
-                    filesExpanded &&
-                    group.files.length > FILES_PREVIEW && (
-                      <button
-                        type="button"
-                        onClick={() => setFilesExpanded(false)}
-                        className="flex w-full items-center justify-center gap-1.5 border-b border-border px-3.5 py-2 text-[12px] text-mcm-blue hover:bg-border-soft"
-                      >
-                        <IconChevronUp size={13} stroke={2} />
-                        Show fewer
-                      </button>
-                    )}
+                  {settled && shownSettled > FILES_PREVIEW && (
+                    <button
+                      type="button"
+                      onClick={() => setShownSettled(FILES_PREVIEW)}
+                      className="flex w-full items-center justify-center gap-1.5 border-b border-border px-3.5 py-2 text-[12px] text-mcm-blue hover:bg-border-soft"
+                    >
+                      <IconChevronUp size={13} stroke={2} />
+                      Collapse
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -394,7 +404,9 @@ export function BundleDetailView({
 
         {installPath && (
           <section className="px-5 pb-3">
-            <div className="mb-2 text-[11px] tracking-wide text-muted">INSTALLED AT</div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-[.09em] text-muted">
+              Installed at
+            </div>
             <div className="flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-2.5">
               <IconFolder size={16} stroke={2} className="shrink-0 text-muted" />
               <span className="flex-1 break-all font-mono text-[12px] text-body">
@@ -414,7 +426,9 @@ export function BundleDetailView({
 
         {installed && (
           <section className="px-5 pb-4">
-            <div className="mb-2 text-[11px] tracking-wide text-muted">DETAILS</div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-[.09em] text-muted">
+              Details
+            </div>
             <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
               <div className="flex justify-between py-1 text-[13px]">
                 <span className="text-muted">Installed</span>
@@ -432,6 +446,30 @@ export function BundleDetailView({
                   </span>
                 </div>
               )}
+            </div>
+          </section>
+        )}
+
+        {/* Say plainly what Remove destroys and what survives, so the button in
+            the footer isn't a guess. */}
+        {installed && (
+          <section className="px-5 pb-4">
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-[.09em] text-error-fg">
+              Danger zone
+            </div>
+            <div className="rounded-lg border border-error-border bg-error-row-bg px-3.5 py-3">
+              <div className="text-[12.5px] font-semibold text-error-fg">
+                Remove this bundle
+              </div>
+              <div className="mt-1 text-[11px] leading-relaxed text-body">
+                Deletes{" "}
+                <span className="tabular-nums font-medium">
+                  {installed.files.length.toLocaleString()}
+                </span>{" "}
+                {installed.files.length === 1 ? "file" : "files"} from this
+                computer. Your team's copy in the shared repository is not
+                touched, so you can install it again at any time.
+              </div>
             </div>
           </section>
         )}

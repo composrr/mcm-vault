@@ -587,9 +587,12 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
           <div className="pb-2">
             {categories.map((cat) => (
               <div key={cat.key}>
-                <div className="sticky top-0 z-10 bg-surface px-5 pb-1 pt-3">
-                  <span className="text-[10.5px] font-semibold tracking-wider text-muted uppercase">
+                <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border-soft bg-white px-5 pb-1.5 pt-2.5">
+                  <span className="text-[10px] font-bold uppercase tracking-[.09em] text-muted">
                     {cat.label}
+                  </span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-muted">
+                    {cat.bundles.length}
                   </span>
                 </div>
                 <div>
@@ -620,48 +623,64 @@ const toggleFiles = (bundleId: string, fileNames: string[], checked: boolean) =>
                         key={bundle.id}
                         type="button"
                         onClick={() => setSelectedBundleId(bundle.id)}
-                        className="flex w-full items-center gap-2.5 border-b border-border-soft px-5 py-1.5 text-left transition-colors hover:bg-border-soft/60 last:border-b-0"
+                        className={`flex w-full items-start gap-2.5 border-b border-border-soft px-5 py-2.5 text-left transition-colors hover:bg-border-soft/60 last:border-b-0 ${
+                          hasChanges ? "bg-update-row-bg" : ""
+                        }`}
                       >
-                        {/* Status icon */}
-                        <div className="shrink-0 w-[18px] flex items-center justify-center">
+                        {/* Status tile — same vocabulary as the Receive list. */}
+                        <div className="mt-px shrink-0">
                           {scanning ? (
-                            <IconLoader2 size={14} stroke={2} className="animate-spin text-muted" />
+                            <div className="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-mcm-blue-tint text-mcm-blue">
+                              <IconLoader2 size={13} stroke={2.5} className="animate-spin" />
+                            </div>
                           ) : hasChanges ? (
-                            <div className="h-3.5 w-3.5 rounded-full bg-mcm-blue" />
+                            <div className="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-mcm-blue text-white">
+                              <IconCloudUpload size={13} stroke={2.5} />
+                            </div>
                           ) : isPublished ? (
-                            <IconCheck size={16} stroke={2} className="text-success-fg" />
+                            <div className="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-success-bg text-success-fg">
+                              <IconCheck size={13} stroke={3} />
+                            </div>
                           ) : (
-                            <IconFile size={16} stroke={2} className="text-muted" />
+                            <div className="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-not-installed-bg text-not-installed-fg">
+                              <IconFile size={13} stroke={2.5} />
+                            </div>
                           )}
                         </div>
 
-                        {/* Name + meta */}
+                        {/* Name + meta. Status word sits on the second line so a
+                            long bundle name never collides with the badges. */}
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-[13px] font-medium leading-tight text-ink">
                             {bundle.name}
                           </div>
-                          <div className="text-[10.5px] leading-tight text-muted">
-                            {presetLabel} · {fileCount} file{fileCount === 1 ? "" : "s"}
-                            {isPublished && entry?.lastPublishedVersion ? ` · v${entry.lastPublishedVersion}` : ""}
+                          <div className="mt-1 flex items-center gap-1.5">
+                            <span className="truncate text-[11px] leading-tight text-muted">
+                              {presetLabel} · {fileCount} file{fileCount === 1 ? "" : "s"}
+                              {isPublished && entry?.lastPublishedVersion ? ` · v${entry.lastPublishedVersion}` : ""}
+                            </span>
+                            {!hasChanges && isPublished && (
+                              <span className="shrink-0 rounded bg-success-bg px-1.5 py-px text-[9.5px] font-semibold tracking-[.02em] text-success-fg">
+                                published
+                              </span>
+                            )}
+                            {hasChanges && (
+                              <span className="flex shrink-0 items-center gap-1">
+                                {addCount > 0 && (
+                                  <span className="rounded bg-success-bg px-1.5 py-px text-[9.5px] font-semibold tabular-nums text-success-fg">+{addCount}</span>
+                                )}
+                                {modCount > 0 && (
+                                  <span className="rounded bg-mcm-blue/15 px-1.5 py-px text-[9.5px] font-semibold tabular-nums text-mcm-blue">~{modCount}</span>
+                                )}
+                                {remCount > 0 && (
+                                  <span className="rounded bg-error-bg px-1.5 py-px text-[9.5px] font-semibold tabular-nums text-error-fg">-{remCount}</span>
+                                )}
+                              </span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Change badges */}
-                        {hasChanges && (
-                          <div className="flex shrink-0 items-center gap-1">
-                            {addCount > 0 && (
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-success-bg text-success-fg">+{addCount}</span>
-                            )}
-                            {modCount > 0 && (
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-mcm-blue/15 text-mcm-blue">~{modCount}</span>
-                            )}
-                            {remCount > 0 && (
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-error-bg text-error-fg">-{remCount}</span>
-                            )}
-                          </div>
-                        )}
-
-                        <IconChevronRight size={13} stroke={2} className="shrink-0 text-muted" />
+                        <IconChevronRight size={13} stroke={2} className="mt-1.5 shrink-0 text-muted" />
                       </button>
                     );
                   })}

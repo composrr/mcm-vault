@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   IconArrowLeft,
   IconRefresh,
@@ -32,6 +32,99 @@ interface SettingsPanelProps {
 
 const INTERVALS: AppSettings["checkInterval"][] = ["1h", "4h", "12h", "24h"];
 
+/** Section label sits ABOVE its card, outside it — same idiom as the bundle
+ *  list's group headers, so settings read as one continuous system. */
+function Section({
+  label,
+  danger = false,
+  children,
+}: {
+  label: string;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section>
+      <div
+        className={`mb-1.5 px-0.5 text-[10px] font-bold uppercase tracking-[.09em] ${
+          danger ? "text-error-fg" : "text-muted"
+        }`}
+      >
+        {label}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** A card that holds one or more setting rows, hairline-divided. */
+function Card({
+  children,
+  danger = false,
+}: {
+  children: ReactNode;
+  danger?: boolean;
+}) {
+  return (
+    <div
+      className={`overflow-hidden rounded-lg border ${
+        danger ? "border-error-border bg-error-row-bg" : "border-border bg-surface"
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** One setting: label on the first line, optional description UNDERNEATH it
+ *  (never beside it — a 520px window has no room for a second column), with
+ *  the control right-aligned. */
+function Row({
+  label,
+  description,
+  control,
+  stacked = false,
+}: {
+  label: string;
+  description?: ReactNode;
+  control?: ReactNode;
+  stacked?: boolean;
+}) {
+  return (
+    <div className="border-b border-border-soft px-3.5 py-2.5 last:border-b-0">
+      <div className={stacked ? "" : "flex items-center justify-between gap-3"}>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] leading-tight text-ink">{label}</div>
+          {description && (
+            <div className="mt-1 text-[11px] leading-relaxed text-body">
+              {description}
+            </div>
+          )}
+        </div>
+        {control && (
+          <div className={stacked ? "mt-2" : "shrink-0"}>{control}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Switch({ checked }: { checked: boolean }) {
+  return (
+    <div
+      className={`relative inline-flex h-4 w-8 shrink-0 items-center rounded-full transition-colors ${
+        checked ? "bg-mcm-blue" : "bg-border-strong"
+      }`}
+    >
+      <span
+        className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-[17px]" : "translate-x-[3px]"
+        }`}
+      />
+    </div>
+  );
+}
+
 function Toggle({
   checked,
   onChange,
@@ -46,28 +139,20 @@ function Toggle({
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between gap-4 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-left hover:bg-border-soft"
+      className="flex w-full items-center justify-between gap-3 border-b border-border-soft px-3.5 py-2.5 text-left last:border-b-0 hover:bg-border-soft"
     >
-      <div className="flex-1">
-        <div className="text-[13px] font-medium text-ink">{label}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] leading-tight text-ink">{label}</div>
         {description && (
-          <div className="mt-0.5 text-[12px] leading-relaxed text-body">
+          <div className="mt-1 text-[11px] leading-relaxed text-body">
             {description}
           </div>
         )}
       </div>
-      <div
-        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-          checked ? "bg-mcm-blue" : "bg-border-strong"
-        }`}
-      >
-        <span
-          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-            checked ? "translate-x-[18px]" : "translate-x-[2px]"
-          }`}
-        />
-      </div>
+      <Switch checked={checked} />
     </button>
   );
 }
@@ -111,68 +196,72 @@ export function SettingsPanel({
       </div>
 
       <div className="space-y-5 px-5 py-5">
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">UPDATES</div>
-          <div className="space-y-2">
+        <Section label="Syncing">
+          <Card>
             <Toggle
               checked={settings.showNotifications}
-              onChange={(v) =>
-                onChange({ ...settings, showNotifications: v })
-              }
+              onChange={(v) => onChange({ ...settings, showNotifications: v })}
               label="Show notifications when bundles update"
+              description="A desktop notification each time a bundle installs or updates in the background."
             />
-            <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
-              <div className="mb-2 text-[13px] font-medium text-ink">
-                Check for updates every
-              </div>
-              <div className="flex gap-1.5">
-                {INTERVALS.map((interval) => (
-                  <button
-                    key={interval}
-                    type="button"
-                    onClick={() => onChange({ ...settings, checkInterval: interval })}
-                    className={`flex-1 rounded-md border px-3 py-1.5 text-[12px] tabular-nums transition-colors ${
-                      settings.checkInterval === interval
-                        ? "border-mcm-blue bg-mcm-blue text-white"
-                        : "border-border-strong bg-white text-ink hover:bg-border-soft"
-                    }`}
-                  >
-                    {interval}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">FOLDER LABEL</div>
-          <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
-            <div className="mb-1 text-[13px] font-medium text-ink">
-              Name used for created folders
-            </div>
-            <div className="mb-2 text-[12px] leading-relaxed text-body">
-              Used for <span className="font-mono">Documents/&lt;label&gt; Presets</span> and Resolve's <span className="font-mono">LUT/&lt;label&gt;</span> subfolder. App data folder stays MCMVault.
-            </div>
-            <input
-              type="text"
-              value={settings.folderLabel}
-              onChange={(e) =>
-                onChange({ ...settings, folderLabel: e.target.value })
+            <Row
+              label="Check for updates every"
+              stacked
+              control={
+                <div className="flex gap-1.5">
+                  {INTERVALS.map((interval) => (
+                    <button
+                      key={interval}
+                      type="button"
+                      onClick={() =>
+                        onChange({ ...settings, checkInterval: interval })
+                      }
+                      className={`flex-1 rounded-md border px-3 py-1.5 text-[12px] tabular-nums transition-colors ${
+                        settings.checkInterval === interval
+                          ? "border-mcm-blue bg-mcm-blue text-white"
+                          : "border-border-strong bg-white text-ink hover:bg-border-soft"
+                      }`}
+                    >
+                      {interval}
+                    </button>
+                  ))}
+                </div>
               }
-              placeholder="MCM Vault"
-              className="w-full rounded-md border border-border-strong bg-white px-2.5 py-1.5 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
             />
-            <div className="mt-1.5 text-[11px] text-muted">
-              Changing this won't move existing files; click <em>Update all</em> on the main view to reinstall to the new path.
-            </div>
-          </div>
-        </section>
+            <Row
+              label="Name used for created folders"
+              description={
+                <>
+                  Used for{" "}
+                  <span className="break-all font-mono text-[10.5px]">
+                    Documents/&lt;label&gt; Presets
+                  </span>{" "}
+                  and Resolve's{" "}
+                  <span className="break-all font-mono text-[10.5px]">
+                    LUT/&lt;label&gt;
+                  </span>{" "}
+                  subfolder. App data folder stays MCMVault. Changing this won't
+                  move existing files — click <em>Update all</em> on the main
+                  view to reinstall to the new path.
+                </>
+              }
+              stacked
+              control={
+                <input
+                  type="text"
+                  value={settings.folderLabel}
+                  onChange={(e) =>
+                    onChange({ ...settings, folderLabel: e.target.value })
+                  }
+                  placeholder="MCM Vault"
+                  className="w-full rounded-md border border-border-strong bg-white px-3 py-2 text-[13px] text-ink focus:border-mcm-blue focus:outline-none"
+                />
+              }
+            />
+          </Card>
+        </Section>
 
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">
-            INSTALL TARGETS
-          </div>
+        <Section label="Install targets">
           <InstallTargetsPicker
             settings={settings}
             onChange={(installTargets) =>
@@ -180,87 +269,104 @@ export function SettingsPanel({
             }
             folderLabel={settings.folderLabel || "MCM Vault"}
           />
-        </section>
+        </Section>
 
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">
-            SYNC ACROSS MACHINES
-          </div>
+        <Section label="Sync across machines">
           <SyncAcrossMachines />
-        </section>
+        </Section>
 
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">PUBLISHER</div>
-          <Toggle
-            checked={settings.publisherMode}
-            onChange={(v) => onChange({ ...settings, publisherMode: v })}
-            label="Enable publisher mode"
-            description="Adds a Publish view where you push your local preset changes to the GitHub repo for the team. Uses your existing git credentials."
-          />
-        </section>
-
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">RECENT ACTIVITY</div>
-          <RecentActivity />
-          <button
-            type="button"
-            onClick={onOpenLogFolder}
-            className="mt-2 flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3.5 py-2 hover:bg-border-soft"
-          >
-            <span className="text-[12px] text-body">Open log folder</span>
-            <IconExternalLink size={14} stroke={2} className="text-muted" />
-          </button>
-        </section>
-
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">DIAGNOSTICS</div>
-          <button
-            type="button"
-            onClick={() => void handleRunDiagnostics()}
-            disabled={running}
-            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3.5 py-2.5 hover:bg-border-soft disabled:opacity-60"
-          >
-            <span className="text-[13px] text-ink">
-              {running ? "Scanning…" : "Run diagnostics"}
-            </span>
-            <IconRefresh
-              size={16}
-              stroke={2}
-              className={`text-muted ${running ? "animate-spin" : ""}`}
+        <Section label="Publisher">
+          <Card>
+            <Toggle
+              checked={settings.publisherMode}
+              onChange={(v) => onChange({ ...settings, publisherMode: v })}
+              label="Enable publisher mode"
+              description="Adds a Publish view where you push your local preset changes to the GitHub repo for the team. Uses your existing git credentials."
             />
-          </button>
+          </Card>
+        </Section>
+
+        <Section label="Recent activity">
+          <RecentActivity />
+        </Section>
+
+        <Section label="Diagnostics">
+          <Card>
+            <button
+              type="button"
+              onClick={() => void handleRunDiagnostics()}
+              disabled={running}
+              className="flex w-full items-center justify-between gap-3 border-b border-border-soft px-3.5 py-2.5 text-left last:border-b-0 hover:bg-border-soft disabled:opacity-60"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] leading-tight text-ink">
+                  {running ? "Scanning…" : "Run diagnostics"}
+                </div>
+                <div className="mt-1 text-[11px] leading-relaxed text-body">
+                  Checks detected apps, install paths and permissions, then
+                  prints a report you can send to support.
+                </div>
+              </div>
+              <IconRefresh
+                size={16}
+                stroke={2}
+                className={`shrink-0 text-muted ${running ? "animate-spin" : ""}`}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={onOpenLogFolder}
+              className="flex w-full items-center justify-between gap-3 border-b border-border-soft px-3.5 py-2.5 text-left last:border-b-0 hover:bg-border-soft"
+            >
+              <span className="min-w-0 flex-1 text-[13px] leading-tight text-ink">
+                Open log folder
+              </span>
+              <IconExternalLink
+                size={15}
+                stroke={2}
+                className="shrink-0 text-muted"
+              />
+            </button>
+          </Card>
           {report && (
-            <pre className="mt-2 max-h-[260px] overflow-auto rounded-lg border border-border bg-titlebar px-3 py-2 font-mono text-[11px] leading-relaxed text-body">
+            <pre className="mt-2 max-h-[260px] overflow-auto rounded-lg border border-border bg-titlebar px-3 py-2 font-mono text-[10.5px] leading-relaxed text-body">
               {JSON.stringify(report, null, 2)}
             </pre>
           )}
-        </section>
+        </Section>
 
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">APP UPDATES</div>
+        <Section label="App updates">
           <AppUpdateButton />
-        </section>
+        </Section>
 
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">
-            LEAVING THIS MACHINE
-          </div>
+        <Section label="About">
+          <Card>
+            <Row
+              label="Built for"
+              control={
+                <span className="text-[13px] text-body">
+                  Milestone Creative Media
+                </span>
+              }
+            />
+            <Row
+              label="App version"
+              control={
+                <span className="text-[13px] tabular-nums text-body">
+                  {appVersion}
+                </span>
+              }
+            />
+          </Card>
+        </Section>
+
+        <Section label="Danger zone" danger>
           <WipeMachineSection />
-        </section>
+        </Section>
 
-        <section>
-          <div className="mb-2 text-[11px] tracking-wide text-muted">ABOUT</div>
-          <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5">
-            <div className="flex justify-between py-0.5 text-[13px]">
-              <span className="text-muted">App version</span>
-              <span className="tabular-nums text-ink">{appVersion}</span>
-            </div>
-            <div className="flex justify-between py-0.5 text-[13px]">
-              <span className="text-muted">Built for</span>
-              <span className="text-ink">Milestone Creative Media</span>
-            </div>
-          </div>
-        </section>
+        <div className="pt-1 text-center font-mono text-[10.5px] text-muted">
+          MCM Vault v{appVersion}
+        </div>
       </div>
     </div>
   );
@@ -363,8 +469,8 @@ function RecentActivity() {
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-surface">
       <div className="flex items-center justify-between border-b border-border-soft bg-titlebar px-3 py-1">
-        <span className="text-[10px] tracking-wide text-muted">
-          {entries.length} most recent
+        <span className="text-[10px] font-bold uppercase tracking-[.09em] text-muted">
+          <span className="tabular-nums">{entries.length}</span> most recent
         </span>
         <button
           type="button"
@@ -379,7 +485,7 @@ function RecentActivity() {
         {entries.map((entry, i) => (
           <div
             key={i}
-            className="flex items-start gap-2 border-b border-border-soft px-3 py-1.5 text-[12px] last:border-b-0"
+            className="flex items-start gap-2 border-b border-border-soft px-3 py-1.5 text-[11.5px] last:border-b-0"
           >
             <span
               className={`shrink-0 tabular-nums text-[10px] mt-[2px] ${
@@ -474,9 +580,9 @@ function InstallTargetsPicker({
 
   return (
     <div className="space-y-2">
-      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 text-[12px] leading-relaxed text-body">
-        Pick which installed versions receive new files. Leave a row's checkboxes
-        empty for "highest version only" (the default).
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[11px] leading-relaxed text-body">
+        Pick which installed versions receive new files. Leave a row's versions
+        unselected for "highest version only" (the default).
       </div>
       <AppRow
         label="Premiere Pro"
@@ -510,9 +616,13 @@ interface AppRowProps {
 function AppRow({ label, versions, selected, onChange }: AppRowProps) {
   if (versions.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-surface px-3.5 py-2 opacity-60">
-        <div className="text-[13px] font-medium text-ink">{label}</div>
-        <div className="mt-0.5 text-[11px] text-muted">Not installed</div>
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3.5 py-2.5">
+        <div className="min-w-0 flex-1 truncate text-[13px] leading-tight text-muted">
+          {label}
+        </div>
+        <span className="shrink-0 rounded bg-not-installed-bg px-1.5 py-px text-[9.5px] font-semibold tracking-[.02em] text-muted">
+          not installed
+        </span>
       </div>
     );
   }
@@ -533,8 +643,8 @@ function AppRow({ label, versions, selected, onChange }: AppRowProps) {
         <div className="text-[13px] font-medium text-ink">{label}</div>
         <div className="flex items-center gap-2.5">
           {selected.length === 0 && (
-            <span className="rounded bg-border-soft px-1.5 py-0.5 text-[10px] tracking-wide text-muted">
-              HIGHEST ONLY
+            <span className="shrink-0 rounded bg-not-installed-bg px-1.5 py-px text-[9.5px] font-semibold tracking-[.02em] text-muted">
+              highest only
             </span>
           )}
           {selected.length < versions.length && (
@@ -640,7 +750,7 @@ function SyncAcrossMachines() {
 
   return (
     <div className="space-y-2">
-      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] leading-relaxed text-body">
+      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[11px] leading-relaxed text-body">
         Copy your install targets, muted bundles, folder label, and update
         preferences to your other computers. Export here, move the file over,
         and import there.
@@ -679,7 +789,7 @@ function SyncAcrossMachines() {
           type="button"
           onClick={() => void doExport()}
           disabled={busy !== "idle"}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-4 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
         >
           {busy === "export" ? (
             <IconRefresh size={15} stroke={2} className="animate-spin" />
@@ -692,7 +802,7 @@ function SyncAcrossMachines() {
           type="button"
           onClick={() => void doImport()}
           disabled={busy !== "idle"}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-4 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
         >
           {busy === "import" ? (
             <IconRefresh size={15} stroke={2} className="animate-spin" />
@@ -764,15 +874,27 @@ function WipeMachineSection() {
 
   return (
     <div className="space-y-2">
-      <div className="rounded-lg border border-border bg-surface px-3.5 py-2.5 text-[12px] leading-relaxed text-body">
-        On a borrowed or client machine? Remove every preset MCM Vault installed
-        plus its saved data, all at once. Your own files stay put.
-      </div>
+      <Card danger>
+        <div className="px-3.5 py-3">
+          <div className="text-[13px] font-semibold leading-tight text-error-fg">
+            Remove everything from this machine
+          </div>
+          <div className="mt-1.5 text-[11px] leading-relaxed text-body">
+            Deletes the{" "}
+            <span className="tabular-nums">{fileCount}</span> preset{" "}
+            {fileCount === 1 ? "file" : "files"} MCM Vault installed on this
+            computer and clears its saved data here — install history, muted
+            bundles, install targets and folder label. Files you created
+            yourself, your host apps, and your team's copy in the shared
+            repository are not touched. Can't be undone from here.
+          </div>
+        </div>
+      </Card>
       <button
         type="button"
         onClick={() => void doWipe()}
         disabled={busy}
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-error-border bg-white px-3.5 py-2.5 text-[13px] text-error-fg hover:bg-error-row-bg disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-error-border bg-white px-4 py-2 text-[13px] text-error-fg hover:bg-error-row-bg disabled:opacity-50"
       >
         {busy ? (
           <IconRefresh size={15} stroke={2} className="animate-spin" />
@@ -781,12 +903,10 @@ function WipeMachineSection() {
         )}
         {busy
           ? "Removing…"
-          : `Remove everything from this machine${
-              fileCount > 0 ? ` (${fileCount} files)` : ""
-            }`}
+          : `Remove everything${fileCount > 0 ? ` (${fileCount} files)` : ""}`}
       </button>
       {message && (
-        <div className="rounded-lg border border-success-border bg-success-bg px-3.5 py-2 text-[11.5px] leading-relaxed text-ink">
+        <div className="rounded-lg border border-success-border bg-success-bg px-3.5 py-2 text-[11px] leading-relaxed text-ink">
           {message}
         </div>
       )}
@@ -871,24 +991,26 @@ function AppUpdateButton() {
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => void onClick()}
-      disabled={busy}
-      className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3.5 py-2.5 hover:bg-border-soft disabled:opacity-60"
-    >
-      <span
-        className={`text-[13px] ${
-          status.kind === "error" ? "text-error-fg" : "text-ink"
-        }`}
+    <Card>
+      <button
+        type="button"
+        onClick={() => void onClick()}
+        disabled={busy}
+        className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-border-soft disabled:opacity-60"
       >
-        {label}
-      </span>
-      <IconRefresh
-        size={16}
-        stroke={2}
-        className={`text-muted ${busy ? "animate-spin" : ""}`}
-      />
-    </button>
+        <span
+          className={`min-w-0 flex-1 text-[13px] leading-tight ${
+            status.kind === "error" ? "text-error-fg" : "text-ink"
+          }`}
+        >
+          {label}
+        </span>
+        <IconRefresh
+          size={16}
+          stroke={2}
+          className={`shrink-0 text-muted ${busy ? "animate-spin" : ""}`}
+        />
+      </button>
+    </Card>
   );
 }
