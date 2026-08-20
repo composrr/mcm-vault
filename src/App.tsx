@@ -174,6 +174,47 @@ function App() {
     return () => clearInterval(id);
   }, [isFirstRun, persisted.settings.checkInterval, refresh]);
 
+  // Re-check the manifest whenever the window comes back to the front. Publishing
+  // happens on another machine, so returning to this one is exactly the moment
+  // the list is most likely to be stale — and it saves hunting for a button.
+  // Throttled so alt-tabbing repeatedly doesn't hammer the network.
+  const lastFocusRefresh = useRef(0);
+  useEffect(() => {
+    if (isFirstRun) return;
+    const MIN_GAP_MS = 20_000;
+    const maybeRefresh = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastFocusRefresh.current < MIN_GAP_MS) return;
+      // Don't disturb an install that's mid-flight.
+      if (Object.values(useAppStore.getState().runtime).some((r) => r.installing)) {
+        return;
+      }
+      lastFocusRefresh.current = now;
+      void refresh();
+    };
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", maybeRefresh);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", maybeRefresh);
+    };
+  }, [isFirstRun, refresh]);
+
+  // Ctrl/Cmd+R re-checks the repo. The webview's own reload is not useful here
+  // and only throws away state, so take the key over.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        lastFocusRefresh.current = Date.now();
+        void refresh();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [refresh]);
+
   useEffect(() => {
     const installingIds = Object.entries(runtime)
       .filter(([, r]) => r.installing)

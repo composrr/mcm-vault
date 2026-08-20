@@ -38,18 +38,22 @@ export function StatusBar({
         {appVersion && (
           <span className="tabular-nums text-muted">v{appVersion}</span>
         )}
+        {/* Labelled, not just a glyph — this is the "I just published on the
+            other machine, show me" button and it has to be findable. */}
         <button
           type="button"
-          aria-label="Refresh"
+          aria-label="Check for new presets now"
+          title="Check for new presets now (Ctrl/Cmd+R)"
           onClick={onRefresh}
           disabled={refreshing}
-          className="flex items-center justify-center rounded-md p-1 text-muted hover:bg-border-soft disabled:opacity-50"
+          className="flex items-center gap-1 rounded-md border border-border-strong bg-white px-2 py-1 text-[11px] font-medium text-mcm-blue hover:bg-mcm-blue-tint disabled:opacity-50"
         >
           <IconRefresh
-            size={14}
+            size={13}
             stroke={2}
             className={refreshing ? "animate-spin" : ""}
           />
+          {refreshing ? "Checking…" : "Refresh"}
         </button>
       </div>
     </div>
