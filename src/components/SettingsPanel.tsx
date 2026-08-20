@@ -5,6 +5,7 @@ import {
   IconExternalLink,
   IconDeviceLaptop,
   IconCheck,
+  IconSparkles,
   IconAlertTriangle,
   IconUpload,
   IconDownload,
@@ -196,6 +197,10 @@ export function SettingsPanel({
       </div>
 
       <div className="space-y-5 px-5 py-5">
+        <Section label="App version">
+          <AppUpdateButton currentVersion={appVersion} />
+        </Section>
+
         <Section label="Syncing">
           <Card>
             <Toggle
@@ -333,10 +338,6 @@ export function SettingsPanel({
               {JSON.stringify(report, null, 2)}
             </pre>
           )}
-        </Section>
-
-        <Section label="App updates">
-          <AppUpdateButton />
         </Section>
 
         <Section label="About">
@@ -920,7 +921,7 @@ function WipeMachineSection() {
 }
 
 
-function AppUpdateButton() {
+function AppUpdateButton({ currentVersion }: { currentVersion: string }) {
   const [status, setStatus] = useState<
     | { kind: "idle" }
     | { kind: "checking" }
@@ -967,50 +968,88 @@ function AppUpdateButton() {
     }
   };
 
-  let label = "Check for app updates";
+  let label = "Check for updates";
+  let detail = `You're on v${currentVersion}`;
   let busy = false;
   if (status.kind === "checking") {
     label = "Checking…";
     busy = true;
   } else if (status.kind === "uptodate") {
-    label = "Up to date";
+    label = "Check again";
+    detail = `v${currentVersion} — you're up to date`;
   } else if (status.kind === "available") {
-    label = `Update available — v${status.version}, downloading…`;
+    label = "Downloading…";
+    detail = `Update found — v${status.version}`;
     busy = true;
   } else if (status.kind === "downloading") {
     const pct = status.total
       ? Math.floor((status.downloaded / status.total) * 100)
       : null;
     label = pct != null ? `Downloading… ${pct}%` : "Downloading…";
+    detail = "The app restarts itself when this finishes";
     busy = true;
   } else if (status.kind === "ready") {
     label = "Restarting…";
+    detail = "Installing the update";
     busy = true;
   } else if (status.kind === "error") {
-    label = `Update failed: ${status.message}`;
+    label = "Try again";
+    detail = status.message;
   }
+
+  const isError = status.kind === "error";
+  const isCurrent = status.kind === "uptodate";
 
   return (
     <Card>
-      <button
-        type="button"
-        onClick={() => void onClick()}
-        disabled={busy}
-        className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-border-soft disabled:opacity-60"
-      >
-        <span
-          className={`min-w-0 flex-1 text-[13px] leading-tight ${
-            status.kind === "error" ? "text-error-fg" : "text-ink"
+      <div className="px-3.5 py-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              isError
+                ? "bg-error-bg text-error-fg"
+                : isCurrent
+                  ? "bg-success-bg text-success-fg"
+                  : "bg-mcm-blue-tint text-mcm-blue"
+            }`}
+          >
+            {isCurrent ? (
+              <IconCheck size={19} stroke={2.5} />
+            ) : (
+              <IconSparkles size={19} stroke={2} />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium leading-tight text-ink">
+              MCM Vault
+            </div>
+            <div
+              className={`mt-0.5 text-[11px] leading-tight tabular-nums ${
+                isError ? "text-error-fg" : "text-muted"
+              }`}
+            >
+              {detail}
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void onClick()}
+          disabled={busy}
+          className={`mt-3 flex w-full items-center justify-center gap-1.5 rounded-md px-3.5 py-2.5 text-[13px] font-medium disabled:opacity-60 ${
+            isCurrent
+              ? "bg-mcm-blue-tint text-mcm-blue hover:bg-mcm-blue/15"
+              : "bg-mcm-blue text-white hover:bg-mcm-blue-hover"
           }`}
         >
+          <IconRefresh
+            size={16}
+            stroke={2}
+            className={busy ? "animate-spin" : ""}
+          />
           {label}
-        </span>
-        <IconRefresh
-          size={16}
-          stroke={2}
-          className={`shrink-0 text-muted ${busy ? "animate-spin" : ""}`}
-        />
-      </button>
+        </button>
+      </div>
     </Card>
   );
 }

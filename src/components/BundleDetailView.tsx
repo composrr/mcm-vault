@@ -8,6 +8,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconCircle,
+  IconDownload,
   IconExternalLink,
   IconFile,
   IconFolder,
@@ -250,6 +251,18 @@ export function BundleDetailView({
     return out;
   }, [bundle.files, preview, statusByFile, removeRows]);
 
+  // Wording follows the state, so the same button reads correctly whether this
+  // bundle is missing, stale, already current, or mid-install.
+  const primaryAction = useMemo(() => {
+    if (installing) return { label: "Installing…", loud: true, Icon: IconDownload };
+    if (status === "error") return { label: "Try again", loud: true, Icon: IconRefresh };
+    if (status === "update") return { label: "Update now", loud: true, Icon: IconDownload };
+    if (status === "notinstalled" || !installed) {
+      return { label: "Install now", loud: true, Icon: IconDownload };
+    }
+    return { label: "Reinstall", loud: false, Icon: IconRefresh };
+  }, [status, installing, installed]);
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-white">
       {/* Sticky header */}
@@ -477,16 +490,27 @@ export function BundleDetailView({
 
       {/* Sticky footer */}
       <div className="flex-none border-t border-border bg-surface px-5 py-3.5">
+        {/* Primary action, always in the same place on every bundle. It only
+            wears the loud blue when there is actually work to do — a shouting
+            button on an up-to-date bundle just teaches people to ignore it. */}
+        <button
+          type="button"
+          onClick={onReinstall}
+          disabled={installing}
+          className={`mb-2 flex w-full items-center justify-center gap-1.5 rounded-md px-3.5 py-2.5 text-[13px] font-medium disabled:opacity-60 ${
+            primaryAction.loud
+              ? "bg-mcm-blue text-white hover:bg-mcm-blue-hover"
+              : "bg-mcm-blue-tint text-mcm-blue hover:bg-mcm-blue/15"
+          }`}
+        >
+          {installing ? (
+            <IconLoader2 size={16} stroke={2} className="animate-spin" />
+          ) : (
+            <primaryAction.Icon size={16} stroke={2} />
+          )}
+          {primaryAction.label}
+        </button>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onReinstall}
-            disabled={installing}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border-strong bg-white px-3.5 py-2 text-[13px] text-ink hover:bg-border-soft disabled:opacity-50"
-          >
-            <IconRefresh size={16} stroke={2} />
-            {installed ? "Reinstall" : "Install"}
-          </button>
           <button
             type="button"
             onClick={onReveal}
@@ -500,7 +524,7 @@ export function BundleDetailView({
               type="button"
               onClick={onRemove}
               disabled={installing}
-              className="flex items-center justify-center gap-1.5 rounded-md border border-error-border bg-white px-3.5 py-2 text-[13px] text-error-fg hover:bg-error-row-bg disabled:opacity-50"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-error-border bg-white px-3.5 py-2 text-[13px] text-error-fg hover:bg-error-row-bg disabled:opacity-50"
             >
               <IconTrash size={16} stroke={2} />
               Remove

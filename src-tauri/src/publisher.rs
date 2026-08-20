@@ -279,12 +279,81 @@ pub struct PublishPlan {
 /// For most preset types this is identity. For `keyboard`, prefixes the file
 /// with the current OS's subfolder name (`win/` or `mac/`) so the same bundle
 /// can carry separate Windows and macOS `.kys` files without collision.
+/// Windows rejects these outright in a file name; macOS and Linux allow most of
+/// them. A name published from a Mac containing one of these cannot be created
+/// on Windows at all — it fails with os error 123 — so names are normalised to
+/// a portable form on the way into the repo, and every machine then agrees on
+/// the same name. `/` is excluded here because it is the path separator and is
+/// handled as structure, not as part of a segment.
+const WINDOWS_RESERVED_CHARS: [char; 7] = ['<', '>', ':', '"', '|', '?', '*'];
+
+/// Device names Windows refuses regardless of extension.
+const WINDOWS_RESERVED_STEMS: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// True if `name` contains anything Windows cannot store.
+pub fn has_unportable_name(name: &str) -> bool {
+    name.replace('\\', "/")
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .any(|segment| {
+            segment.chars().any(|c| WINDOWS_RESERVED_CHARS.contains(&c) || (c as u32) < 32)
+                || segment.ends_with('.')
+                || segment.ends_with(' ')
+                || {
+                    let stem = segment.split('.').next().unwrap_or("").to_ascii_uppercase();
+                    WINDOWS_RESERVED_STEMS.contains(&stem.as_str())
+                }
+        })
+}
+
+/// Rewrite a path so every segment is storable on Windows as well as macOS.
+/// Reserved characters become "-", runs of dashes collapse, and trailing dots
+/// or spaces are trimmed. Path separators are preserved.
+pub fn portable_name(name: &str) -> String {
+    let normalized = name.replace('\\', "/");
+    let mut segments: Vec<String> = Vec::new();
+    for segment in normalized.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        let mut cleaned = String::with_capacity(segment.len());
+        for c in segment.chars() {
+            if WINDOWS_RESERVED_CHARS.contains(&c) || (c as u32) < 32 {
+                cleaned.push('-');
+            } else {
+                cleaned.push(c);
+            }
+        }
+        // Collapse " - - " and "--" runs the substitution can create.
+        while cleaned.contains("--") {
+            cleaned = cleaned.replace("--", "-");
+        }
+        while cleaned.contains("- -") {
+            cleaned = cleaned.replace("- -", "-");
+        }
+        let mut cleaned = cleaned.trim().trim_end_matches(['.', ' ']).to_string();
+        let stem = cleaned.split('.').next().unwrap_or("").to_ascii_uppercase();
+        if WINDOWS_RESERVED_STEMS.contains(&stem.as_str()) {
+            cleaned = format!("_{cleaned}");
+        }
+        if cleaned.is_empty() {
+            cleaned = "_".into();
+        }
+        segments.push(cleaned);
+    }
+    segments.join("/")
+}
+
 fn repo_name_for(preset_type: &str, local_name: &str) -> String {
+    let portable = portable_name(local_name);
     if preset_type == "keyboard" {
         let prefix = if cfg!(target_os = "macos") { "mac/" } else { "win/" };
-        format!("{prefix}{local_name}")
+        format!("{prefix}{portable}")
     } else {
-        local_name.to_string()
+        portable
     }
 }
 

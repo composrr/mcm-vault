@@ -119,9 +119,21 @@ const IS_MAC =
 // macOS hands back decomposed Unicode, and Windows uses backslashes. Compare on
 // a normalized key so a preset that is already in the repo is never shown as
 // unpublished just because another machine published it.
+/** Characters Windows refuses in a file name. A Mac can publish them, so the
+ *  repo stores a normalised spelling and this key lets the original local name
+ *  and the normalised repo name compare equal — otherwise the publisher would
+ *  report a rename as an add plus a remove on every scan. Mirrors
+ *  `portable_name` in src-tauri/src/publisher.rs. */
 function nameKey(name: string): string {
-  return name.replace(/\\/g, "/").normalize("NFC").toLowerCase();
+  return name
+    .split("\\").join("/")
+    .normalize("NFC")
+    .replace(/[<>:"|?*]/g, "-")
+    .replace(/- -/g, "-")
+    .replace(/-{2,}/g, "-")
+    .toLowerCase();
 }
+
 
 function repoNameToLocalName(presetType: string, repoName: string): string | null {
   if (presetType !== "keyboard") return repoName;
