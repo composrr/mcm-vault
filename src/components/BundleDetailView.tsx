@@ -53,6 +53,30 @@ const PRESET_LABEL: Record<string, string> = {
   render: "Render",
 };
 
+// Group tones. The pill's WORD carries the meaning, so colour stays redundant
+// rather than load-bearing — readable in greyscale and for colourblind users.
+type GroupTone = "blue" | "green" | "red" | "muted";
+
+const TONE_HEADER: Record<GroupTone, string> = {
+  blue: "text-mcm-blue",
+  green: "text-success-fg",
+  red: "text-error-fg",
+  muted: "text-muted",
+};
+
+const TONE_PILL: Record<GroupTone, string> = {
+  blue: "bg-mcm-blue/15 text-mcm-blue",
+  green: "bg-success-bg text-success-fg",
+  red: "bg-error-bg text-error-fg",
+  muted: "bg-border-soft text-muted",
+};
+
+const GROUP_PILL_LABEL: Record<string, string> = {
+  update: "update",
+  new: "new",
+  remove: "will remove",
+};
+
 function statusLabel(status: BundleStatusKind, installing?: boolean): string {
   if (installing) return "Installing…";
   switch (status) {
@@ -155,6 +179,7 @@ export function BundleDetailView({
   const [preview, setPreview] = useState<PreviewFile[] | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const priorSizes = installed?.fileSizes ?? null;
+  const installedPaths = installed?.files ?? null;
 
   useEffect(() => {
     if (!isTauri() || status !== "update") {
@@ -165,11 +190,11 @@ export function BundleDetailView({
     let cancelled = false;
     setPreview(null);
     setPreviewFailed(false);
-    void previewInstall(bundle, pathOverride, priorSizes)
+    void previewInstall(bundle, pathOverride, priorSizes, installedPaths)
       .then((rows) => { if (!cancelled) setPreview(rows); })
       .catch(() => { if (!cancelled) setPreviewFailed(true); });
     return () => { cancelled = true; };
-  }, [bundle, status, pathOverride, priorSizes]);
+  }, [bundle, status, pathOverride, priorSizes, installedPaths]);
 
   const statusByFile = useMemo(() => {
     const m: Record<string, PreviewFile["status"]> = {};
@@ -177,22 +202,47 @@ export function BundleDetailView({
     return m;
   }, [preview]);
 
-  const pendingCount = (preview ?? []).filter((r) => r.status !== "unchanged").length;
+  // Files dropped upstream. They are not in bundle.files any more, so they only
+  // exist in the preview — surface them or the deletion looks like a no-op.
+  const removeRows = useMemo(
+    () => (preview ?? []).filter((r) => r.status === "remove"),
+    [preview]
+  );
   const newCount = (preview ?? []).filter((r) => r.status === "new").length;
   const changedCount = (preview ?? []).filter((r) => r.status === "update").length;
+  const removeCount = removeRows.length;
+  const pendingCount = newCount + changedCount + removeCount;
 
-  // Put the files that will actually change at the top, so the truncated
-  // preview list shows the answer without needing to expand it.
-  const allFiles = useMemo(() => {
-    if (!preview) return bundle.files;
-    const rank = (n: string) =>
-      statusByFile[n] === "update" ? 0 : statusByFile[n] === "new" ? 1 : 2;
-    return [...bundle.files].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-  }, [bundle.files, preview, statusByFile]);
-
-  const hasMore = allFiles.length > FILES_PREVIEW;
-  const visibleFiles = filesExpanded ? allFiles : allFiles.slice(0, FILES_PREVIEW);
-  const hiddenCount = allFiles.length - FILES_PREVIEW;
+  // Group the list so the work this update will actually do sits at the top and
+  // everything already in place collapses underneath it.
+  const groups = useMemo(() => {
+    const sorted = (arr: string[]) => [...arr].sort((a, b) => a.localeCompare(b));
+    if (!preview) {
+      return [
+        { key: "all", label: "Files", tone: "muted" as GroupTone, files: sorted(bundle.files) },
+      ];
+    }
+    const pick = (s: string) =>
+      sorted(bundle.files.filter((f) => statusByFile[f] === s));
+    const settled = sorted(
+      bundle.files.filter((f) => !statusByFile[f] || statusByFile[f] === "unchanged")
+    );
+    const out: { key: string; label: string; tone: GroupTone; files: string[] }[] = [];
+    const upd = pick("update");
+    const fresh = pick("new");
+    if (upd.length) out.push({ key: "update", label: "Will update", tone: "blue", files: upd });
+    if (fresh.length) out.push({ key: "new", label: "New", tone: "green", files: fresh });
+    if (removeRows.length)
+      out.push({
+        key: "remove",
+        label: "Will remove",
+        tone: "red",
+        files: sorted(removeRows.map((r) => r.name)),
+      });
+    if (settled.length)
+      out.push({ key: "unchanged", label: "Already installed", tone: "muted", files: settled });
+    return out;
+  }, [bundle.files, preview, statusByFile, removeRows]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-white">
@@ -244,7 +294,9 @@ export function BundleDetailView({
 
         <section className="px-5 pb-3">
           <div className="mb-2 flex items-baseline justify-between gap-2">
-            <span className="text-[11px] tracking-wide text-muted">FILES ({allFiles.length})</span>
+            <span className="text-[11px] tracking-wide text-muted">
+              FILES ({bundle.files.length})
+            </span>
             {status === "update" && (
               <span className="text-[11px] text-body">
                 {preview
@@ -253,7 +305,7 @@ export function BundleDetailView({
                     : [
                         changedCount > 0 ? `${changedCount} to update` : null,
                         newCount > 0 ? `${newCount} new` : null,
-                        `${allFiles.length - pendingCount} unchanged`,
+                        removeCount > 0 ? `${removeCount} will remove` : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")
@@ -263,52 +315,80 @@ export function BundleDetailView({
               </span>
             )}
           </div>
-          <div className="overflow-hidden rounded-lg border border-border bg-surface">
-            {visibleFiles.map((file) => (
-              <div
-                key={file}
-                className="flex items-center gap-2.5 border-b border-border px-3.5 py-2 last:border-b-0"
-              >
-                <IconFile size={14} stroke={2} className="shrink-0 text-muted" />
-                <span className="flex-1 truncate text-[12px] text-ink">{file}</span>
-                {statusByFile[file] && statusByFile[file] !== "unchanged" && (
-                  <span
-                    className={
-                      "shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-wide " +
-                      (statusByFile[file] === "new"
-                        ? "bg-success-bg text-success-fg"
-                        : "bg-mcm-blue/15 text-mcm-blue")
-                    }
-                  >
-                    {statusByFile[file] === "new" ? "new" : "update"}
-                  </span>
-                )}
-                {bundle.fileDates?.[file] && (
-                  <span className="shrink-0 text-[11px] text-muted tabular-nums">
-                    {formatDate(bundle.fileDates[file])}
-                  </span>
-                )}
-              </div>
-            ))}
-            {hasMore && (
-              <button
-                type="button"
-                onClick={() => setFilesExpanded((v) => !v)}
-                className="flex w-full items-center justify-center gap-1.5 border-t border-border px-3.5 py-2 text-[12px] text-mcm-blue hover:bg-border-soft"
-              >
-                {filesExpanded ? (
-                  <>
-                    <IconChevronUp size={13} stroke={2} />
-                    Show fewer files
-                  </>
-                ) : (
-                  <>
-                    <IconChevronDown size={13} stroke={2} />
-                    Show {hiddenCount} more file{hiddenCount === 1 ? "" : "s"}
-                  </>
-                )}
-              </button>
-            )}
+
+          {/* One scroll. Sticky group headers keep the reader oriented, and the
+              groups that represent actual work sort above the settled files. */}
+          <div className="max-h-[340px] overflow-y-auto rounded-lg border border-border bg-surface">
+            {groups.map((group) => {
+              const capped = group.key !== "all" && group.tone === "muted" && !filesExpanded;
+              const shown = capped ? group.files.slice(0, FILES_PREVIEW) : group.files;
+              const hidden = group.files.length - shown.length;
+              return (
+                <div key={group.key}>
+                  {groups.length > 1 && (
+                    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface px-3.5 py-1.5">
+                      <span
+                        className={`text-[10px] font-semibold uppercase tracking-wider ${TONE_HEADER[group.tone]}`}
+                      >
+                        {group.label}
+                      </span>
+                      <span className="text-[10px] tabular-nums text-muted">
+                        {group.files.length}
+                      </span>
+                    </div>
+                  )}
+                  {shown.map((file) => (
+                    <div
+                      key={`${group.key}:${file}`}
+                      className="flex items-center gap-2.5 border-b border-border px-3.5 py-2"
+                    >
+                      <IconFile size={14} stroke={2} className="shrink-0 text-muted" />
+                      <span
+                        className={`flex-1 truncate text-[12px] ${
+                          group.key === "remove" ? "text-muted line-through" : "text-ink"
+                        }`}
+                      >
+                        {file}
+                      </span>
+                      {GROUP_PILL_LABEL[group.key] && (
+                        <span
+                          className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-wide ${TONE_PILL[group.tone]}`}
+                        >
+                          {GROUP_PILL_LABEL[group.key]}
+                        </span>
+                      )}
+                      {group.key !== "remove" && bundle.fileDates?.[file] && (
+                        <span className="shrink-0 text-[11px] text-muted tabular-nums">
+                          {formatDate(bundle.fileDates[file])}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFilesExpanded(true)}
+                      className="flex w-full items-center justify-center gap-1.5 border-b border-border px-3.5 py-2 text-[12px] text-mcm-blue hover:bg-border-soft"
+                    >
+                      <IconChevronDown size={13} stroke={2} />
+                      Show {hidden} more file{hidden === 1 ? "" : "s"}
+                    </button>
+                  )}
+                  {group.tone === "muted" &&
+                    filesExpanded &&
+                    group.files.length > FILES_PREVIEW && (
+                      <button
+                        type="button"
+                        onClick={() => setFilesExpanded(false)}
+                        className="flex w-full items-center justify-center gap-1.5 border-b border-border px-3.5 py-2 text-[12px] text-mcm-blue hover:bg-border-soft"
+                      >
+                        <IconChevronUp size={13} stroke={2} />
+                        Show fewer
+                      </button>
+                    )}
+                </div>
+              );
+            })}
           </div>
         </section>
 

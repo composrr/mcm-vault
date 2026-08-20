@@ -334,7 +334,9 @@ async fn resolve_targets_for(
 #[serde(rename_all = "camelCase")]
 pub struct PreviewFile {
     pub name: String,
-    /// "new" (not on disk), "update" (on disk, size differs) or "unchanged".
+    /// "new" (not on disk), "update" (on disk, size differs), "unchanged", or
+    /// "remove" (installed previously but dropped from the bundle upstream —
+    /// the install will delete it).
     pub status: String,
 }
 
@@ -346,6 +348,7 @@ pub async fn preview_install(
     bundle: Bundle,
     path_override: Option<String>,
     prior_file_sizes: Option<HashMap<String, u64>>,
+    installed_files: Option<Vec<String>>,
 ) -> Result<Vec<PreviewFile>, InstallError> {
     let targets = resolve_targets_for(&bundle, path_override.as_deref()).await?;
     let client = http_client()?;
@@ -383,6 +386,41 @@ pub async fn preview_install(
             status: status.to_string(),
         });
     }
+
+    // Files this machine installed previously that the bundle no longer
+    // contains. `install_bundle` deletes these as stale, so report them here —
+    // otherwise a publisher un-checking a file looks like a no-op to everyone
+    // else until the files silently vanish.
+    if let Some(prev_files) = installed_files {
+        let mut expected: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for target in &targets {
+            let dir = PathBuf::from(&target.path);
+            for file_name in &bundle.files {
+                if let Some((dst_dir, basename)) =
+                    route_for_file(&bundle.preset_type, &dir, file_name)
+                {
+                    expected.insert(dst_dir.join(&basename).to_string_lossy().to_string());
+                }
+            }
+        }
+        for path in prev_files {
+            if expected.contains(&path) {
+                continue;
+            }
+            if !std::path::Path::new(&path).exists() {
+                continue;
+            }
+            let base = std::path::Path::new(&path)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.clone());
+            out.push(PreviewFile {
+                name: base,
+                status: "remove".to_string(),
+            });
+        }
+    }
+
     Ok(out)
 }
 
