@@ -267,6 +267,34 @@ export function PublisherView({ bundles, folderLabel }: PublisherViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundles.length]);
 
+  // Re-scan local folders when the window comes back to the front. This is a
+  // disk walk (a LUT bundle can hold 1,000+ files), so it is throttled harder
+  // than the manifest re-check, and it only runs at all while the Publish view
+  // is mounted — browsing Receive never pays for it.
+  const scanRef = useRef(scan);
+  scanRef.current = scan;
+  const busyRef = useRef(false);
+  busyRef.current = scanning || publishing;
+  const lastFocusScan = useRef(Date.now());
+
+  useEffect(() => {
+    const MIN_GAP_MS = 15_000;
+    const maybeScan = () => {
+      if (document.visibilityState === "hidden") return;
+      if (busyRef.current) return;
+      const now = Date.now();
+      if (now - lastFocusScan.current < MIN_GAP_MS) return;
+      lastFocusScan.current = now;
+      void scanRef.current();
+    };
+    window.addEventListener("focus", maybeScan);
+    document.addEventListener("visibilitychange", maybeScan);
+    return () => {
+      window.removeEventListener("focus", maybeScan);
+      document.removeEventListener("visibilitychange", maybeScan);
+    };
+  }, []);
+
   const toggleFile = (bundleId: string, fileName: string) => {
     const existing = persisted.publisher[bundleId];
     const cur = new Set(existing?.includedFiles ?? []);
